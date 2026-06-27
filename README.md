@@ -1,8 +1,8 @@
-# Super Brain (超脑) — AI Agent 认知增强系统
+#超脑 (Super Brain) — AI Agent 认知增强系统
 
-[![Version](https://img.shields.io/badge/version-2.0.0-blue)](https://github.com/A1m1ng777888/super-brain)
-[![Python](https://img.shields.io/badge/python-3.8+-green)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[版本](https://img.shields.io/badge/version-2.0.0-blue) (https://github.com/A1m1ng777888/super-brain)
+![[Python](https://img.shields.io/badge/python-3.8+-green) (https://www.python.org/)
+[![许可证]("https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-120%20PASS-brightgreen)](scripts/test_v2.py)
 [![SkillOpt](https://img.shields.io/badge/SkillOpt-self--evolution-purple)](https://github.com/microsoft/SkillOpt)
 
@@ -75,7 +75,8 @@ python scripts/superbrain.py skillopt history
 
 # 执行轨迹记录
 python scripts/superbrain.py trace record --command "memory add" --feedback satisfied
-python scripts/superbrain.py trace stats
+运行 Python 脚本 `superbrain.py`，并传入参数 `trace` 和 `stats`：  
+`python scripts/superbrain.py trace stats`
 ```
 
 ---
@@ -104,7 +105,7 @@ python scripts/test_v2.py           # v2 新功能测试 (71项)
 ```bash
 # 添加一条记忆
 python scripts/superbrain.py memory add \
-  --type preference \
+--type 偏好 \
   --content "用户偏好暗色主题 IDE" \
   --entity "user" \
   --confidence 0.95
@@ -125,8 +126,8 @@ python scripts/superbrain.py version
 
 ### 记忆类型
 
-| 类型 | 说明 | 示例 |
-|------|------|------|
+|类型|说明|示例|
+|------|------|------|"
 | `fact` | 客观事实 | "项目使用 Python 3.13" |
 | `preference` | 用户偏好 | "用户偏好简洁回复" |
 | `event` | 发生的事件 | "2026-06-26 完成了超脑开发" |
