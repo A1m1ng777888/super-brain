@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """
 SuperBrain CLI - Unified entry point for the Super Brain skill.
-Provides subcommands for memory, graph, search, selfcheck, workspace, and stats management.
+Provides subcommands for memory, graph, search, selfcheck, workspace, stats,
+skillopt (self-evolution), and trace (execution recording) management.
 
 Usage:
+    # Core commands
     python superbrain.py init
+    python superbrain.py version
+    python superbrain.py stats
+
+    # Memory engine
     python superbrain.py memory add --type fact --content "..." --entity "..."
     python superbrain.py memory list [--type TYPE] [--entity ENTITY] [--limit N]
     python superbrain.py memory search QUERY [--limit N]
@@ -13,19 +19,37 @@ Usage:
     python superbrain.py memory merge --id1 ID --id2 ID
     python superbrain.py memory context QUERY [--limit N]
     python superbrain.py memory stats
+
+    # Knowledge graph
     python superbrain.py graph add-node --name NAME --type TYPE [--aliases ...]
     python superbrain.py graph add-edge --source NAME --target NAME --type TYPE
     python superbrain.py graph query NAME [--depth N]
     python superbrain.py graph list [--type TYPE]
     python superbrain.py graph stats
     python superbrain.py graph delete --name NAME
+
+    # Self-check and health
     python superbrain.py selfcheck [--fix]
     python superbrain.py health
+
+    # Workspace management
     python superbrain.py workspace list
     python superbrain.py workspace create --name NAME
     python superbrain.py workspace switch --name NAME
-    python superbrain.py stats
-    python superbrain.py version
+
+    # SkillOpt self-evolution (v2.0.0+)
+    python superbrain.py skillopt status
+    python superbrain.py skillopt self-evolve --epochs 3
+    python superbrain.py skillopt optimize --skill-path PATH --epochs 3
+    python superbrain.py skillopt history
+    python superbrain.py skillopt rejected
+
+    # Execution trace recording (v2.0.0+)
+    python superbrain.py trace record --command "memory add" --input '{"content": "..."}'
+    python superbrain.py trace feedback --trace-id ID --rating satisfied
+    python superbrain.py trace list [--limit N]
+    python superbrain.py trace stats
+    python superbrain.py trace export [--output PATH]
 """
 
 import sys
@@ -52,6 +76,15 @@ from sb_graph import (
 )
 from sb_selfcheck import (
     run_full_check, get_health_report, get_health_score
+)
+from sb_trace import (
+    record_trace, add_explicit_feedback, get_traces, get_trace_stats,
+    export_traces_for_skillopt
+)
+from sb_skillopt import (
+    optimize_external_skill, self_evolve, get_optimization_history,
+    get_rejected_buffer, rollback_skillopt, skillopt_status,
+    get_default_validation_tasks
 )
 
 
@@ -331,9 +364,194 @@ def cmd_version(args):
     """Show version information."""
     config = load_config()
     print(f"SuperBrain version {config.get('version', '1.0.0')}")
-    print(f"Release date: 2026-06-26")
+    print(f"Release date: 2026-06-27")
     print(f"Data directory: {config.get('data_dir', DEFAULT_DATA_DIR)}")
     print(f"Current workspace: {config.get('current_workspace', 'default')}")
+
+
+# === SkillOpt Commands ===
+
+def cmd_skillopt_optimize(args):
+    """Optimize an external skill using SkillOpt."""
+    import json as json_mod
+    
+    # Load validation tasks
+    validation_tasks = None
+    if args.validation_tasks:
+        with open(args.validation_tasks, "r", encoding="utf-8") as f:
+            validation_tasks = json_mod.load(f)
+    
+    result = optimize_external_skill(
+        skill_path=args.skill_path,
+        traces=[],  # TODO: load traces from file if provided
+        validation_tasks=validation_tasks,
+        epochs=args.epochs,
+        workspace=args.workspace
+    )
+    
+    print(f"\n=== SkillOpt Optimization ===")
+    print(f"Skill: {args.skill_path}")
+    print(f"Epochs completed: {result['epochs_completed']}")
+    print(f"Final status: {result['final_status']}")
+    print()
+    for r in result["results"]:
+        status_icon = "[OK]" if r["accepted"] else "[X]"
+        print(f"  Epoch {r['epoch']}: {status_icon} {r['message']}")
+
+
+def cmd_skillopt_self_evolve(args):
+    """Run self-evolution on super-brain's own SKILL.md."""
+    import json as json_mod
+    
+    # Load validation tasks if provided
+    validation_tasks = None
+    if args.validation_tasks:
+        with open(args.validation_tasks, "r", encoding="utf-8") as f:
+            validation_tasks = json_mod.load(f)
+    
+    result = self_evolve(
+        epochs=args.epochs,
+        validation_tasks=validation_tasks,
+        workspace=args.workspace
+    )
+    
+    if result["status"] == "error":
+        print(f"Error: {result['message']}")
+        sys.exit(1)
+    
+    print(f"\n=== SuperBrain Self-Evolution ===")
+    print(f"Epochs completed: {result['epochs_completed']}")
+    print(f"Final status: {result['final_status']}")
+    print()
+    for r in result["results"]:
+        status_icon = "[OK]" if r.get("accepted") else "[X]"
+        print(f"  Epoch {r['epoch']}: {status_icon} {r['message']}")
+
+
+def cmd_skillopt_history(args):
+    """Show optimization history."""
+    history = get_optimization_history(args.workspace, limit=args.limit)
+    
+    if not history:
+        print("No optimization history found.")
+        return
+    
+    print(f"Optimization History ({len(history)} epochs):")
+    for h in history:
+        status_icon = "[OK]" if h["accepted"] else "[X]"
+        print(f"  {status_icon} Epoch {h['epoch']}: {h['status']}")
+        print(f"      Score: {h['current_score']:.3f} -> {h['candidate_score']:.3f}")
+        print(f"      Edits: {len(h['applied_edits'])} applied")
+        print(f"      Time: {h['timestamp']}")
+
+
+def cmd_skillopt_rejected(args):
+    """Show rejected edit buffer."""
+    buffer = get_rejected_buffer(args.workspace)
+    
+    if not buffer:
+        print("Rejected edit buffer is empty.")
+        return
+    
+    print(f"Rejected Edit Buffer ({len(buffer)} entries):")
+    for entry in buffer[-args.limit:]:
+        print(f"  Epoch {entry['epoch']}: {entry['message']}")
+        print(f"    Proposed edits: {len(entry['proposed_edits'])}")
+
+
+def cmd_skillopt_status(args):
+    """Show SkillOpt status."""
+    status = skillopt_status(args.workspace)
+    
+    print("=== SkillOpt Status ===")
+    print(f"Optimization epochs: {status['optimization_epochs']}")
+    if status['last_epoch']:
+        print(f"Last epoch: {status['last_epoch']} ({status['last_epoch_status']})")
+    print(f"Rejected edits in buffer: {status['rejected_edits']}")
+    print()
+    
+    trace_stats = status['trace_stats']
+    if trace_stats['total'] > 0:
+        print(f"Traces: {trace_stats['total']} total")
+        print(f"  Avg score: {trace_stats.get('avg_score', 'N/A')}")
+        print(f"  Explicit feedback: {trace_stats.get('satisfied_count', 0)} satisfied / {trace_stats.get('dissatisfied_count', 0)} dissatisfied")
+    else:
+        print("Traces: No execution traces recorded yet.")
+    print()
+    print(f"Default validation tasks: {status['default_validation_tasks']}")
+
+
+def cmd_skillopt_rollback(args):
+    """Rollback to a previous epoch."""
+    # Find skill path
+    skill_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    skill_path = os.path.join(skill_dir, "SKILL.md")
+    
+    result = rollback_skillopt(args.epoch, skill_path, args.workspace)
+    print(f"Rollback result: {result['status']}")
+    print(f"  {result['message']}")
+
+
+# === Trace Commands ===
+
+def cmd_trace_record(args):
+    """Record an execution trace (usually called programmatically)."""
+    import json as json_mod
+    
+    input_data = json_mod.loads(args.input) if args.input else {}
+    output_data = json_mod.loads(args.output) if args.output else {}
+    
+    trace = record_trace(
+        command=args.command,
+        input_data=input_data,
+        output_data=output_data,
+        workspace=args.workspace,
+        explicit_rating=args.rating,
+        implicit_signals={"completed": True, "error": False, "timeout": False} if not args.error else {"completed": False, "error": True, "timeout": False},
+        validation_score=args.validation_score
+    )
+    
+    print(f"Trace recorded: {trace['trace_id']}")
+    print(f"  Weighted score: {trace['weighted_score']}")
+
+
+def cmd_trace_feedback(args):
+    """Add explicit feedback to a trace."""
+    trace = add_explicit_feedback(args.trace_id, args.rating, args.workspace)
+    if trace:
+        print(f"Feedback added to trace {args.trace_id}")
+        print(f"  New weighted score: {trace['weighted_score']}")
+    else:
+        print(f"Trace not found: {args.trace_id}")
+        sys.exit(1)
+
+
+def cmd_trace_list(args):
+    """List execution traces."""
+    traces = get_traces(args.workspace, limit=args.limit)
+    
+    if not traces:
+        print("No traces found.")
+        return
+    
+    print(f"Execution Traces ({len(traces)} shown):")
+    for t in traces:
+        rating = t["signals"]["explicit"]["rating"] if t["signals"]["explicit"] else "none"
+        print(f"  {t['trace_id']} | {t['command']} | score: {t['weighted_score']:.2f} | rating: {rating}")
+        print(f"    Time: {t['timestamp']}")
+
+
+def cmd_trace_stats(args):
+    """Show trace statistics."""
+    stats = get_trace_stats(args.workspace)
+    import json as json_mod
+    print_json(stats)
+
+
+def cmd_trace_export(args):
+    """Export traces for SkillOpt."""
+    output_path = export_traces_for_skillopt(args.workspace, args.output)
+    print(f"Traces exported to: {output_path}")
 
 
 def build_parser():
@@ -488,6 +706,87 @@ def build_parser():
     # version
     sp = subparsers.add_parser("version", help="Show version information")
     sp.set_defaults(func=cmd_version)
+
+    # === SkillOpt subparser ===
+    sp_skillopt = subparsers.add_parser("skillopt", help="SkillOpt self-evolution engine")
+    skillopt_sub = sp_skillopt.add_subparsers(dest="skillopt_command")
+
+    # skillopt optimize
+    sp = skillopt_sub.add_parser("optimize", help="Optimize an external skill")
+    sp.add_argument("--skill-path", required=True, help="Path to SKILL.md to optimize")
+    sp.add_argument("--validation-tasks", help="Path to validation tasks JSON file")
+    sp.add_argument("--epochs", type=int, default=3, help="Number of optimization epochs")
+    sp.add_argument("--workspace", help="Workspace for optimization state")
+    sp.set_defaults(func=cmd_skillopt_optimize)
+
+    # skillopt self-evolve
+    sp = skillopt_sub.add_parser("self-evolve", help="Self-evolve super-brain's own SKILL.md")
+    sp.add_argument("--epochs", type=int, default=3, help="Number of optimization epochs")
+    sp.add_argument("--validation-tasks", help="Path to validation tasks JSON file")
+    sp.add_argument("--workspace", help="Workspace for optimization state")
+    sp.set_defaults(func=cmd_skillopt_self_evolve)
+
+    # skillopt history
+    sp = skillopt_sub.add_parser("history", help="Show optimization history")
+    sp.add_argument("--limit", type=int, default=10, help="Max entries to show")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_skillopt_history)
+
+    # skillopt rejected
+    sp = skillopt_sub.add_parser("rejected", help="Show rejected edit buffer")
+    sp.add_argument("--limit", type=int, default=10, help="Max entries to show")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_skillopt_rejected)
+
+    # skillopt status
+    sp = skillopt_sub.add_parser("status", help="Show SkillOpt status")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_skillopt_status)
+
+    # skillopt rollback
+    sp = skillopt_sub.add_parser("rollback", help="Rollback to a previous epoch")
+    sp.add_argument("--epoch", type=int, required=True, help="Epoch number to rollback to")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_skillopt_rollback)
+
+    # === Trace subparser ===
+    sp_trace = subparsers.add_parser("trace", help="Execution trace recording")
+    trace_sub = sp_trace.add_subparsers(dest="trace_command")
+
+    # trace record
+    sp = trace_sub.add_parser("record", help="Record an execution trace")
+    sp.add_argument("--command", required=True, help="Subcommand executed")
+    sp.add_argument("--input", help="Input arguments as JSON")
+    sp.add_argument("--output", help="Output result as JSON")
+    sp.add_argument("--rating", choices=["satisfied", "dissatisfied"], help="Explicit user rating")
+    sp.add_argument("--error", action="store_true", help="Execution had an error")
+    sp.add_argument("--validation-score", type=float, help="Validation score (0-1)")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_trace_record)
+
+    # trace feedback
+    sp = trace_sub.add_parser("feedback", help="Add explicit feedback to a trace")
+    sp.add_argument("--trace-id", required=True, help="Trace ID")
+    sp.add_argument("--rating", required=True, choices=["satisfied", "dissatisfied"], help="User rating")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_trace_feedback)
+
+    # trace list
+    sp = trace_sub.add_parser("list", help="List execution traces")
+    sp.add_argument("--limit", type=int, default=20, help="Max traces to show")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_trace_list)
+
+    # trace stats
+    sp = trace_sub.add_parser("stats", help="Show trace statistics")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_trace_stats)
+
+    # trace export
+    sp = trace_sub.add_parser("export", help="Export traces for SkillOpt")
+    sp.add_argument("--output", help="Output file path")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_trace_export)
 
     return parser
 

@@ -31,12 +31,13 @@ def test(name, condition, detail=""):
 def section(title):
     print(f"\n=== {title} ===")
 
-# === SETUP: Clean workspace ===
+# === SETUP: Clean workspaces ===
 section("Setup")
-ensure_workspace("default")
-write_memories([], "default")
-write_graph({"nodes": {}, "edges": {}}, "default")
-print("  Workspace cleaned.")
+for ws in ["default", "test"]:
+    ensure_workspace(ws)
+    write_memories([], ws)
+    write_graph({"nodes": {}, "edges": {}}, ws)
+print("  Workspaces cleaned.")
 
 # === TEST: Search Engine ===
 section("Search Engine (sb_search)")
@@ -205,8 +206,9 @@ if errors:
         print(f"    - {e}")
 
 # Cleanup
-write_memories([], "default")
-write_graph({"nodes": {}, "edges": {}}, "default")
+for ws in ["default", "test"]:
+    write_memories([], ws)
+    write_graph({"nodes": {}, "edges": {}}, ws)
 print("\n  Test data cleaned.")
 
 sys.exit(0 if failed == 0 else 1)
