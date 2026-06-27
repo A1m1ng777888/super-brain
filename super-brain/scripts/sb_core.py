@@ -18,7 +18,7 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 
 # Default config
 DEFAULT_CONFIG = {
-    "version": "1.0.0",
+    "version": "2.0.0",
     "data_dir": DEFAULT_DATA_DIR,
     "current_workspace": "default",
     "simhash_bits": 64,
@@ -30,6 +30,16 @@ DEFAULT_CONFIG = {
         "context_compression": True,
         "max_context_memories": 10,
         "summary_mode": "structured"
+    },
+    "skillopt": {
+        "edit_budget": 4,
+        "min_improvement": 0.01,
+        "rejected_buffer_size": 20,
+        "signal_weights": {
+            "explicit": 1.0,
+            "implicit": 0.3,
+            "validation": 0.5
+        }
     }
 }
 

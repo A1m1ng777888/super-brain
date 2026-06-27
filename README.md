@@ -1,22 +1,28 @@
 # Super Brain (超脑) — AI Agent 认知增强系统
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/A1m1ng777888/super-brain)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue)](https://github.com/A1m1ng777888/super-brain)
 [![Python](https://img.shields.io/badge/python-3.8+-green)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-49%20PASS-brightgreen)](scripts/test_superbrain.py)
+[![Tests](https://img.shields.io/badge/tests-120%20PASS-brightgreen)](scripts/test_v2.py)
+[![SkillOpt](https://img.shields.io/badge/SkillOpt-self--evolution-purple)](https://github.com/microsoft/SkillOpt)
 
-为 AI Agent 提供**持久记忆、知识图谱、语义搜索、自检修复**四大核心能力，解决大模型 Agent 的七大先天缺陷。
+为 AI Agent 提供**持久记忆、知识图谱、语义搜索、自检修复、自我进化**五大核心能力，解决大模型 Agent 的八大先天缺陷。
+
+> **v2.0.0 重大更新**：融合 Microsoft SkillOpt 自我进化引擎，技能文档可像神经网络一样自动优化。
 
 ---
 
 ## 目录
 
 - [特性](#特性)
+- [v2.0.0 新特性](#v200-新特性)
 - [快速开始](#快速开始)
 - [核心概念](#核心概念)
 - [命令参考](#命令参考)
 - [架构设计](#架构设计)
 - [测试](#测试)
+- [配置](#配置)
+- [路线图](#路线图)
 - [贡献](#贡献)
 - [许可证](#许可证)
 
@@ -30,10 +36,47 @@
 | **知识图谱** | 构建实体-关系网络，支持多跳查询、实体对齐 |
 | **SimHash 语义搜索** | 64位 SimHash + TF-IDF 混合检索，纯标准库实现 |
 | **五项自检系统** | 一致性/时效性/完整性/孤立节点/重复数据自动诊断 |
+| **SkillOpt 自我进化** 🆕 | 自动复盘执行轨迹、验证优化技能文档（基于 Microsoft SkillOpt） |
+| **执行轨迹记录** 🆕 | 三信号源加权反馈（显式/隐式/验证集），支持自我进化数据采集 |
 | **Workspace 隔离** | 多项目独立知识空间，互不干扰 |
 | **Token 优化** | 上下文压缩、按需加载，增强能力同时降低 Token 消耗 |
 | **零依赖** | 纯 Python 标准库，无需 pip install |
 | **跨平台** | Windows / macOS / Linux 均可运行 |
+
+---
+
+## v2.0.0 新特性
+
+### SkillOpt 自我进化引擎
+
+基于 [Microsoft SkillOpt](https://github.com/microsoft/SkillOpt) 论文实现，让技能文档像训练神经网络一样自我进化：
+
+```
+执行 (rollout) → 反思 (reflect) → 编辑 (edit) → 验证门控 (gate) → 更新 (update)
+```
+
+核心机制：
+- **文本学习率**：控制每次编辑幅度，防止覆写有用规则
+- **验证门控**：只在留出验证集上分数严格提升才接受更新
+- **拒绝编辑缓冲**：记住有害方向，避免重复错误
+- **三信号加权反馈**：显式反馈 (×1.0) + 隐式信号 (×0.3) + 验证集 (×0.5)
+
+### 新增命令
+
+```bash
+# 优化任意技能
+python scripts/superbrain.py skillopt optimize --skill-path path/to/SKILL.md --tasks tasks.json
+
+# 超脑自我进化
+python scripts/superbrain.py skillopt self-evolve --epochs 3
+
+# 查看优化历史
+python scripts/superbrain.py skillopt history
+
+# 执行轨迹记录
+python scripts/superbrain.py trace record --command "memory add" --feedback satisfied
+python scripts/superbrain.py trace stats
+```
 
 ---
 
@@ -50,10 +93,11 @@ cd super-brain
 python scripts/superbrain.py init
 
 # 验证安装
-python scripts/test_superbrain.py
+python scripts/test_superbrain.py   # v1 核心测试 (49项)
+python scripts/test_v2.py           # v2 新功能测试 (71项)
 ```
 
-预期输出：49 项测试全部 PASS。
+预期输出：120 项测试全部 PASS。
 
 ### 第一步
 
@@ -70,6 +114,9 @@ python scripts/superbrain.py memory search "暗色主题"
 
 # 查看统计
 python scripts/superbrain.py stats
+
+# 查看版本
+python scripts/superbrain.py version
 ```
 
 ---
@@ -103,7 +150,21 @@ python scripts/superbrain.py workspace switch --name "项目-Alpha"
 python scripts/superbrain.py workspace list
 ```
 
-每个 Workspace 拥有独立的记忆库、知识图谱和配置。
+### 执行轨迹 (Trace) 🆕
+
+记录每次 Skill 调用的完整过程，用于自我进化：
+
+```bash
+# 记录执行轨迹
+python scripts/superbrain.py trace record \
+  --command "memory add" \
+  --input "用户偏好暗色主题" \
+  --output "记忆已添加" \
+  --explicit-feedback satisfied
+
+# 查看轨迹统计
+python scripts/superbrain.py trace stats
+```
 
 ---
 
@@ -114,6 +175,7 @@ python scripts/superbrain.py workspace list
 | 命令 | 说明 |
 |------|------|
 | `init` | 初始化数据目录和默认 Workspace |
+| `version` | 显示版本信息 |
 
 ### 记忆管理
 
@@ -123,7 +185,7 @@ python scripts/superbrain.py workspace list
 | `memory list` | 列出记忆（支持 --type/--entity/--status 过滤） |
 | `memory get --id ID` | 按 ID 获取单条记忆 |
 | `memory search "查询"` | 语义搜索记忆 |
-| `memory context "查询"` | Token 优化的上下文检索（适合注入 AI 提示） |
+| `memory context "查询"` | Token 优化的上下文检索 |
 | `memory update --id ID` | 更新记忆 |
 | `memory delete --id ID` | 删除记忆 |
 | `memory merge --id1 ID1 --id2 ID2` | 合并重复记忆 |
@@ -156,16 +218,43 @@ python scripts/superbrain.py workspace list
 | `workspace create --name N` | 创建 Workspace |
 | `workspace switch --name N` | 切换 Workspace |
 
+### 自我进化 🆕
+
+| 命令 | 说明 |
+|------|------|
+| `skillopt status` | 查看进化引擎状态 |
+| `skillopt optimize` | 优化指定技能文档 |
+| `skillopt self-evolve` | 超脑自我进化 |
+| `skillopt history` | 查看优化历史 |
+| `skillopt rollback` | 回滚到历史版本 |
+
+### 执行轨迹 🆕
+
+| 命令 | 说明 |
+|------|------|
+| `trace record` | 记录执行轨迹 |
+| `trace list` | 列出轨迹记录 |
+| `trace stats` | 轨迹统计 |
+| `trace filter` | 按条件过滤轨迹 |
+| `trace feedback` | 追加显式反馈 |
+| `trace export` | 导出轨迹（用于优化） |
+
 ---
 
 ## 架构设计
 
-三层八模块：
+四层十模块（v2 新增自我进化层）：
 
 ```
 ┌─────────────────────────────────────────────┐
 │           交互层 (SKILL.md)               │
-│  触发规则 │ 工作流 │ 设计原则            │
+│  触发规则 │ 工作流 │ 自我进化触发        │
+├─────────────────────────────────────────────┤
+│           自我进化层 (v2 新增)              │
+│  ┌──────────┐  ┌──────────┐            │
+│  │SkillOpt  │  │ 轨迹记录  │            │
+│  │ 进化引擎  │  │  模块    │            │
+│  └──────────┘  └──────────┘            │
 ├─────────────────────────────────────────────┤
 │           核心认知层                         │
 │  ┌──────────┐  ┌──────────┐            │
@@ -180,7 +269,7 @@ python scripts/superbrain.py workspace list
 └─────────────────────────────────────────────┘
 ```
 
-详见 [`references/architecture.md`](references/architecture.md)。
+详见 [`references/architecture.md`](super-brain/references/architecture.md)。
 
 ---
 
@@ -224,7 +313,8 @@ results = search_memories("记忆", limit=5)
 
 ```bash
 cd scripts
-python test_superbrain.py
+python test_superbrain.py   # v1 核心测试 (49项)
+python test_v2.py           # v2 新功能测试 (71项)
 ```
 
 测试覆盖：
@@ -235,6 +325,11 @@ python test_superbrain.py
 - 自检系统五项检查
 - 重复检测（两阶段策略）
 - Workspace 管理
+- **SkillOpt 优化循环** 🆕
+- **三信号加权反馈** 🆕
+- **编辑预算衰减** 🆕
+- **验证门控机制** 🆕
+- **执行轨迹记录/过滤/导出** 🆕
 
 ---
 
@@ -246,12 +341,22 @@ python test_superbrain.py
 |------|------|--------|
 | `SUPERBRAIN_DATA_DIR` | 数据目录路径 | `~/.workbuddy/super-brain` |
 
+配置文件 (`config.json`):
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `version` | 版本号 | `2.0.0` |
+| `skillopt.learning_rate` | 文本学习率 | `0.3` |
+| `skillopt.batch_size` | 批次大小 | `5` |
+| `skillopt.validation_threshold` | 验证门控阈值 | `0.05` |
+
 ---
 
 ## 路线图
 
 | 优先级 | 功能 | 状态 |
 |--------|------|------|
+| ~~P0~~ | ~~SkillOpt 自我进化引擎~~ | ✅ v2.0.0 已完成 |
 | P1 | 感知增强系统（主动提醒） | 📋 规划中 |
 | P2 | 向量化检索升级（可选嵌入模型） | 📋 规划中 |
 | P3 | Token 监测仪表盘 | 📋 规划中 |
@@ -280,10 +385,11 @@ python test_superbrain.py
 
 ## 致谢
 
+- **Microsoft SkillOpt** — 自我进化框架 (https://github.com/microsoft/SkillOpt)
 - SimHash 算法：Moses Charikar
 - TF-IDF：经典信息检索算法
 - 设计灵感：认知科学中的"记忆层级模型"
 
 ---
 
-**v1.0.0** · 2026-06-26 · 纯本地 · 零网络 · 零外部依赖
+**v2.0.0** · 2026-06-27 · 纯本地 · 零网络 · 零外部依赖
