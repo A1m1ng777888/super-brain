@@ -18,7 +18,7 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 
 # Default config
 DEFAULT_CONFIG = {
-    "version": "2.0.0",
+    "version": "3.0.0",
     "data_dir": DEFAULT_DATA_DIR,
     "current_workspace": "default",
     "simhash_bits": 64,
@@ -30,6 +30,37 @@ DEFAULT_CONFIG = {
         "context_compression": True,
         "max_context_memories": 10,
         "summary_mode": "structured"
+    },
+    "temporal": {
+        "enabled": True,
+        "conflict_detection": True,
+        "conflict_overlap_warning": True
+    },
+    "search": {
+        "dynamic_threshold": True,
+        "base_quality_line": 0.1,
+        "max_quality_line": 0.3,
+        "score_ratio": 0.5,
+        "coarse_filter_threshold": 0.05,
+        "ternary_hash": True,
+        "fuzzy_match": True,
+        "word_network_expansion": True
+    },
+    "pipeline": {
+        "definition_half_life_days": 365,
+        "chitchat_half_life_days": 7,
+        "hybrid_half_life_days": 90,
+        "auto_archive_enabled": True
+    },
+    "perception": {
+        "novelty_threshold": 0.55,
+        "value_threshold": 0.2,
+        "batch_mode": False
+    },
+    "entanglement": {
+        "min_strength": 0.1,
+        "max_expansions": 5,
+        "cooccurrence_boost": 0.05
     },
     "skillopt": {
         "edit_budget": 4,

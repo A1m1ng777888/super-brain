@@ -1,138 +1,329 @@
-# Super Brain Architecture
+# Super Brain v3.0.0 架构白皮书
 
-## Three-Layer Eight-Module Design
+> 五层十六模块：从感知、认知、关联、自愈到存储的完整认知增强系统。
 
-```
-+-----------------------------------------------------------+
-|                   Interaction Layer                        |
-|   CLI Commands  |  Proactive Prompts  |  Health Reports   |
-+-----------------------------------------------------------+
-|                   Core Cognitive Layer                     |
-|  +----------+  +----------+  +----------+                |
-|  | Memory   |  | Knowledge|  | Perception|               |
-|  | Engine   |  | Graph    |  | Enhancement|              |
-|  +----------+  +----------+  +----------+                |
-|  +----------+  +----------+  +----------+                |
-|  | Semantic |  | Intelligent| | Self-Check|              |
-|  | Search   |  | Error Fix  | | System    |              |
-|  +----------+  +----------+  +----------+                |
-+-----------------------------------------------------------+
-|                   Storage & Infrastructure                 |
-|  Workspace Isolation  |  Token Optimizer  |  File Store   |
-+-----------------------------------------------------------+
-```
+---
 
-## Module Interactions
-
-### Memory Engine (sb_memory.py)
-Central hub that all other modules interact with:
-- **Receives** extraction requests from the AI → stores memories with SimHash fingerprints
-- **Provides** memories to Semantic Search for query matching
-- **Feeds** entity data to Knowledge Graph for node/edge creation
-- **Supplies** memory data to Self-Check for diagnostic scanning
-- **Returns** token-optimized context to the AI via `get_context()`
-
-### Knowledge Graph (sb_graph.py)
-Entity-relationship network that provides structural context:
-- **Receives** entities from Memory Engine (via AI extraction)
-- **Provides** graph traversal results for context expansion
-- **Reports** orphan nodes to Self-Check for cleanup
-- **Supports** entity alignment (alias-based deduplication)
-
-### Semantic Search (sb_search.py)
-Hybrid retrieval engine combining three strategies:
-1. **SimHash** (fast coarse filtering) — 64-bit locality-sensitive hash, Hamming distance comparison
-2. **TF-IDF Cosine Similarity** (precise ranking) — term frequency with inverse document frequency
-3. **Keyword Match** (exact hit boosting) — token overlap ratio
-
-Search pipeline: Query → SimHash filter → TF-IDF rank → Keyword boost → Top-N results
-
-### Self-Check System (sb_selfcheck.py)
-Periodic diagnostics with five check types:
-- **Consistency**: Detects same-entity memories with high TF-IDF similarity (potential contradictions)
-- **Timeliness**: Flags memories older than 90 days with zero access and low confidence
-- **Completeness**: Finds task-type memories without completion status
-- **Orphans**: Identifies graph nodes with no edges
-- **Duplicates**: Detects memories with SimHash similarity > 85%
-
-Auto-fix capabilities:
-- Archives memories with confidence < 0.3 that are stale
-- Merges memories with similarity > 0.95
-
-### Token Optimizer (cross-cutting)
-Applied across all modules:
-- **Context Compression**: `get_context()` returns only id, type, entity, content, confidence, score — not full memory objects
-- **Structured Injection**: JSON format instead of natural language prose
-- **On-Demand Loading**: Only retrieves `--limit` memories per query (default 5-10)
-- **Incremental Updates**: Only changed data is written, not full rewrites
-- **Confidence Weighting**: Low-confidence memories are filtered out of context injection
-
-## Data Flow
-
-### Memory Extraction Flow
-```
-AI detects memory-worthy info
-  → AI calls: memory add --type ... --content ...
-    → sb_memory.add_memory()
-      → Generate SimHash fingerprint
-      → Append to memories.json
-      → Update workspace meta
-    → Return memory ID to AI
-```
-
-### Context Retrieval Flow
-```
-User asks a question
-  → AI calls: memory context "query" --limit 5
-    → sb_memory.get_context()
-      → sb_search.search_memories() 
-        → SimHash filter + TF-IDF rank + keyword boost
-      → Update access counts on matched memories
-      → Return compressed JSON context
-  → AI injects context into response
-```
-
-### Self-Check Flow
-```
-AI calls: selfcheck --fix
-  → sb_selfcheck.run_full_check(auto_fix=True)
-    → Run 5 checks (consistency, timeliness, completeness, orphans, duplicates)
-    → If auto_fix: archive stale low-confidence, merge near-duplicates
-    → Save report to health/latest_report.json
-    → Return summary to AI
-```
-
-## File Layout
+## 一、总体架构
 
 ```
-~/.workbuddy/super-brain/
-├── config.json                          # Global configuration
-├── health/
-│   ├── latest_report.json               # Most recent self-check
-│   └── report_2026-06-26T06-38-05.json  # Historical reports
-└── workspaces/
-    └── default/
-        ├── memories.json                # All memory records
-        ├── graph.json                   # Knowledge graph (nodes + edges)
-        └── meta.json                    # Workspace metadata
+┌─────────────────────────────────────────────────────────────┐
+│  接口层  │  CLI (superbrain.py)  │  Python API                │
+├─────────────────────────────────────────────────────────────┤
+│  感知层  │  感知增强 (sb_perception)  │  分类管线 (sb_pipeline)   │
+├─────────────────────────────────────────────────────────────┤
+│  认知层  │  记忆引擎 v3 (sb_memory)  │  推理引擎 (sb_reasoning)  │
+│         │  上下文记忆 (sb_context)  │  本地长期记忆 (sb_longterm) │
+├─────────────────────────────────────────────────────────────┤
+│  关联层  │  知识图谱 (sb_graph)     │  纠缠场 (sb_entanglement) │
+│         │  语义搜索 v3 (sb_search)                             │
+├─────────────────────────────────────────────────────────────┤
+│  自愈层  │  自检系统 (sb_selfcheck) │  SkillOpt (sb_skillopt)   │
+│         │  执行轨迹记录 (sb_trace)                             │
+├─────────────────────────────────────────────────────────────┤
+│  存储层  │  Workspace 隔离         │  三进制哈希索引            │
+│         │  JSON 文件存储          │  倒排索引                  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Configuration
+---
 
-```json
-{
-  "version": "1.0.0",
-  "data_dir": "~/.workbuddy/super-brain",
-  "current_workspace": "default",
-  "simhash_bits": 64,
-  "similarity_threshold": 0.65,
-  "max_memories_per_load": 20,
-  "self_check_interval_days": 7,
-  "auto_extract": true,
-  "token_optimization": {
-    "context_compression": true,
-    "max_context_memories": 10,
-    "summary_mode": "structured"
-  }
-}
+## 二、模块职责
+
+### 2.1 感知层
+
+| 模块 | 文件 | 核心能力 | 关键技术 |
+|------|------|----------|----------|
+| 感知增强 | `sb_perception.py` | 判断信息该「学」还是该「查」 | 新颖性检测、信息价值评估 |
+| 分类管线 | `sb_pipeline.py` | 区分定义类/闲聊类，差异化衰减 | 模式匹配、指数衰减 |
+
+#### 感知增强决策流程
+
 ```
+输入文本
+  │
+  ▼
+┌──────────────────────┐
+│  信息价值评估         │  → 分类、密度、特异性、可行动性、长度惩罚
+│  information_value    │
+└──────────┬───────────┘
+           │
+  ┌────────▼────────┐
+  │  新颖性检测      │  → 与现有记忆相似度对比
+  │  novelty_check  │
+  └────────┬────────┘
+           │
+           ▼
+  ┌─────────────────┐
+  │  决策输出        │  → learn / query / both / skip
+  │ should_learn_or_│
+  │      query      │
+  └─────────────────┘
+```
+
+#### 分类管线衰减策略
+
+| 类型 | 半衰期 | 典型内容 | 归档阈值 |
+|------|--------|----------|----------|
+| 定义类 | 365 天 | 概念、事实、规则、偏好 | 衰减分 < 0.15 |
+| 闲聊类 | 7 天 | 寒暄、语气词、临时应答 | 衰减分 < 0.30 |
+| 混合类 | 90 天 | 半事实半讨论 | 衰减分 < 0.20 |
+
+衰减公式：`retention = 0.5^(age/half_life) × access_boost × confidence_boost`
+
+---
+
+### 2.2 认知层
+
+| 模块 | 文件 | 核心能力 | 关键技术 |
+|------|------|----------|----------|
+| 记忆引擎 v3 | `sb_memory.py` | 自动存储、跨对话关联、错别字纠偏、表达学习 | Levenshtein、表达档案 |
+| 推理引擎 | `sb_reasoning.py` | 提炼重点、梳理逻辑、推导结论、辅助决策 | 因果/条件/对比分析 |
+| 上下文记忆 | `sb_context.py` | 同主题归拢、跨窗口跨日期追溯 | 凝聚聚类、线程追踪 |
+| 本地长期记忆 | `sb_longterm.py` | 对话即入库、零成本检索、跨会话关联 | 预计算索引、倒排表 |
+
+#### 记忆引擎 v3.0 数据流
+
+```
+对话文本
+   │
+   ▼
+自动存储 (auto_store)
+   │
+   ├── 生成三进制哈希 (pos_mask, neg_mask)
+   ├── 生成 SimHash
+   ├── 提取关键词
+   └── 写入 JSON 记忆文件
+   │
+   ▼
+更新索引 (build_index)
+   ├── 三进制哈希桶索引
+   ├── 倒排词表
+   └── 字词网络
+```
+
+#### 推理引擎处理管线
+
+```
+文本输入
+  │
+  ├── 提取关键点 (extract_key_points)
+  │       → 词密度、位置、实体、结构四信号
+  │
+  ├── 逻辑分析 (analyze_logic)
+  │       → 因果关系、条件关系、对比关系
+  │
+  ├── 结论推导 (derive_conclusion)
+  │       → 多记忆综合、收敛点、分歧点
+  │
+  └── 决策辅助 (assist_decision)
+          → 选项 × 标准评分矩阵
+```
+
+---
+
+### 2.3 关联层
+
+| 模块 | 文件 | 核心能力 | 关键技术 |
+|------|------|----------|----------|
+| 知识图谱 | `sb_graph.py` | 实体关系网络 | NetworkX-free 实现 |
+| 纠缠场 | `sb_entanglement.py` | 挖掘未明说关联、强化词词联系 | 三通道融合 |
+| 语义搜索 v3 | `sb_search.py` | 六通道融合检索 | TF-IDF + 关键词 + SimHash + 三进制 + 模糊 + 网络扩展 |
+
+#### 三进制哈希（Ternary Hash）
+
+使用 -1 / 0 / +1 三态，每个 bit 有 3 种状态，64 bits 提供 3^64 状态空间（约 2^64 的 19,000 倍区分力）。
+
+存储格式：`(pos_mask, neg_mask)` 两个无符号整数。
+
+相似度：基于非中性位的 Jaccard 相似度。
+
+#### 字词网络（Word Network）
+
+```python
+class WordNetwork:
+    add_document(text)      # 增量构建
+    expand_query(query)     # 查询扩展
+    get_entangled_words(token)  # 获取纠缠词
+    stats()                 # 网络统计
+```
+
+构建方式：对所有记忆文本 tokenize，CJK 使用 trigram，英文使用词干/小写词，维护 token 级共现图。
+
+#### 纠缠场三通道融合
+
+```
+关联得分 = 0.40 × 三进制哈希相似度
+        + 0.35 × 共现频率
+        + 0.25 × 图谱拓扑距离
+```
+
+#### 六通道融合搜索权重
+
+| 通道 | 权重 | 作用 |
+|------|------|------|
+| TF-IDF | 0.35 | 主信号，内容相关性 |
+| 关键词 | 0.20 | 辅助信号，精确匹配 |
+| SimHash | 0.15 | 语义去重 |
+| 三进制哈希 | 0.12 | 高区分力语义相似 |
+| 模糊匹配 | 0.10 | 错别字容错 |
+| 字词网络扩展 | 0.08 | 语义扩展 |
+
+---
+
+### 2.4 自愈层
+
+| 模块 | 文件 | 核心能力 | 版本 |
+|------|------|----------|------|
+| 自检系统 | `sb_selfcheck.py` | 六项指标健康检查 | v2.1 |
+| SkillOpt | `sb_skillopt.py` | 自我进化、参数优化 | v2.1 |
+| 执行轨迹 | `sb_trace.py` | 记录执行历史 | v2.1 |
+
+---
+
+### 2.5 存储层
+
+| 组件 | 说明 |
+|------|------|
+| Workspace 隔离 | 每个 workspace 独立目录，默认 `~/.workbuddy/super-brain/` |
+| 三进制哈希索引 | 预计算 `(pos_mask, neg_mask)` 桶，支持 O(1) 相似度查找 |
+| JSON 文件存储 | 记忆、图谱、索引、配置均用 JSON，便于版本控制和调试 |
+| 倒排索引 | token → memory_id 映射，加速关键词检索 |
+
+---
+
+## 三、核心工作流
+
+### 3.1 对话即入库
+
+```
+用户输入
+  │
+  ▼
+感知增强：should_learn_or_query
+  │
+  ├── 判断为 learn / both ──→ 分类管线 classify_content
+  │                            │
+  │                            ▼
+  │                         推理引擎 extract_key_points
+  │                            │
+  │                            ▼
+  │                         记忆引擎 add_memory
+  │                            │
+  │                            ▼
+  │                         更新索引 build_index
+  │                            │
+  │                            ▼
+  │                         字词网络 add_document
+  │
+  └── 判断为 query ──→ 语义搜索 search_memories
+                            │
+                            ▼
+                      纠缠场 query_entanglement
+                            │
+                            ▼
+                      返回检索结果
+```
+
+### 3.2 零成本检索
+
+```
+查询文本
+  │
+  ▼
+生成三进制哈希 (pos_mask, neg_mask)
+  │
+  ▼
+查三进制哈希桶（O(1)）
+  │
+  ▼
+候选记忆集
+  │
+  ▼
+六通道融合排序
+  │
+  ▼
+Top-K 结果
+```
+
+### 3.3 跨会话追溯
+
+```
+查询主题 / 记忆 ID
+  │
+  ▼
+上下文记忆 topic_cluster
+  │
+  ▼
+trace_thread
+  │
+  ├── 当日同主题对话
+  ├── 历史相似主题（按日期分组）
+  └── 相关记忆链
+  │
+  ▼
+cross_session_recall
+```
+
+---
+
+## 四、向后兼容性
+
+| 场景 | 处理方式 |
+|------|----------|
+| 旧记忆无 `ternary_hash` | 搜索时动态计算 |
+| 旧记忆无 `category` | 默认按混合类处理，半衰期 90 天 |
+| 旧记忆无 `confidence` | 默认 0.5 |
+| SimHash | 保留不变，继续参与搜索 |
+| 旧 CLI 命令 | 全部保留，新增 v3 命令扩展 |
+
+---
+
+## 五、版本演进
+
+| 版本 | 时间 | 核心能力 |
+|------|------|----------|
+| v1.0.0 | 2026-06-XX | 持久记忆、基础搜索、知识图谱 |
+| v2.0.0 | 2026-06-XX | Workspace 隔离、Token 优化 |
+| v2.1.0 | 2026-06-28 | 双时间机制、动态阈值、自检时间指标 |
+| **v3.0.0** | **2026-06-29** | **三进制哈希、六通道搜索、感知、分类、推理、纠缠、上下文、长期记忆** |
+
+---
+
+## 六、调用入口
+
+CLI 主入口：`scripts/superbrain.py`
+
+常用命令：
+
+```bash
+# 初始化
+SB init
+
+# 对话即入库
+SB longterm ingest --text "..."
+
+# 零成本检索
+SB longterm retrieve "..."
+
+# 纠偏搜索
+SB memory search-corrected "..."
+
+# 推理
+SB reason extract --text "..."
+SB reason conclude "..."
+
+# 纠缠
+SB entangle mine --concept "..."
+
+# 上下文
+SB context-mem trace --topic "..."
+
+# 测试
+SB test --suite v3
+```
+
+---
+
+*文档版本：v3.0.0*
+*最后更新：2026-06-29*

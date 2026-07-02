@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 SuperBrain Self-Check System
-Periodic diagnostics: consistency, timeliness, completeness, orphans, duplicates.
+Periodic diagnostics: consistency, timeliness, temporal_validity (v2.1.0),
+completeness, orphans, duplicates.
 Generates health reports and can auto-fix safe issues.
 """
 
@@ -36,6 +37,95 @@ def check_consistency(workspace=None):
 
 
 def check_timeliness(workspace=None):
+    """
+    Check for potentially outdated information.
+    Flags memories older than a threshold with low access counts.
+    """
+    from datetime import datetime, timedelta, timezone
+    memories = read_memories(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+
+    config = load_config()
+    stale_days = config.get("stale_threshold_days", 90)
+    now = datetime.now(timezone.utc)
+    stale_memories = []
+
+    for m in active:
+        # Parse timestamp
+        ts_str = m.get("timestamp", "")
+        try:
+            if "T" in ts_str:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            else:
+                ts = datetime.fromisoformat(ts_str + "T00:00:00+00:00")
+            age_days = (now - ts).days
+            access_count = m.get("access_count", 0)
+            confidence = m.get("confidence", 0.5)
+
+            # Flag if: old AND rarely accessed AND not high confidence
+            if age_days > stale_days and access_count == 0 and confidence < 0.9:
+                stale_memories.append({
+                    "id": m["id"],
+                    "type": m["type"],
+                    "entity": m["entity"],
+                    "content": m["content"][:80],
+                    "age_days": age_days,
+                    "last_accessed": m.get("last_accessed", "never"),
+                    "confidence": confidence
+                })
+        except (ValueError, TypeError):
+            continue
+
+    return {
+        "check": "timeliness",
+        "status": "warning" if stale_memories else "healthy",
+        "issues_found": len(stale_memories),
+        "details": stale_memories[:20],
+        "recommendation": "Consider archiving or updating stale memories. Low-confidence, rarely-accessed, old memories may be outdated." if stale_memories else "All memories are within freshness window."
+    }
+
+
+def check_temporal_validity(workspace=None):
+    """
+    v2.1.0: Check for memories with expired temporal validity.
+    Flags active memories whose valid_until is in the past but status is still 'active'.
+    """
+    from datetime import datetime, timezone as tz
+    memories = read_memories(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+    now = datetime.now(tz.utc).strftime("%Y-%m-%d")
+
+    expired = []
+    chained = []
+    for m in active:
+        valid_until = m.get("valid_until")
+        if valid_until and valid_until < now:
+            expired.append({
+                "id": m["id"],
+                "type": m["type"],
+                "entity": m["entity"],
+                "content": m["content"][:80],
+                "valid_from": m.get("valid_from", "?"),
+                "valid_until": valid_until,
+                "confidence": m["confidence"]
+            })
+        if m.get("replaces") or m.get("replaced_by"):
+            chained.append(m["id"])
+
+    return {
+        "check": "temporal_validity",
+        "status": "warning" if expired else "healthy",
+        "issues_found": len(expired),
+        "details": expired[:20],
+        "recommendation": (
+            "Some memories have expired temporal validity but are still active. "
+            "Use 'memory update --id <id> --status superseded' to mark them, "
+            "or update valid_until if the fact is still current."
+        ) if expired else "No expired memories detected.",
+        "chain_linked_count": len(chained)
+    }
+
+
     """
     Check for potentially outdated information.
     Flags memories older than a threshold with low access counts.
@@ -180,6 +270,7 @@ def run_full_check(workspace=None, auto_fix=False):
     checks = [
         check_consistency(workspace),
         check_timeliness(workspace),
+        check_temporal_validity(workspace),  # v2.1.0
         check_completeness(workspace),
         check_orphans(workspace),
         check_duplicates(workspace)
@@ -258,6 +349,8 @@ def get_health_score(workspace=None):
             score -= min(15, issues * 3)
         elif check_name == "completeness":
             score -= min(15, issues * 3)
+        elif check_name == "temporal_validity":
+            score -= min(10, issues * 2)
         elif check_name == "orphans":
             score -= min(10, issues * 2)
 

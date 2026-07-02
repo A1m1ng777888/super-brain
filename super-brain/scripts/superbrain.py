@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-SuperBrain CLI - Unified entry point for the Super Brain skill.
-Provides subcommands for memory, graph, search, selfcheck, workspace, stats,
-skillopt (self-evolution), and trace (execution recording) management.
+SuperBrain CLI v2.1.0 — Unified entry point for the Super Brain skill.
+Provides subcommands for memory (v2.1 temporal), graph, search (v2.1 dynamic threshold),
+selfcheck (v2.1 temporal_validity), workspace, stats, skillopt (self-evolution),
+and trace (execution recording) management.
 
 Usage:
     # Core commands
@@ -37,14 +38,17 @@ Usage:
     python superbrain.py workspace create --name NAME
     python superbrain.py workspace switch --name NAME
 
-    # SkillOpt self-evolution (v2.0.0+)
+    # SkillOpt self-evolution & trace recording (v2.0.0+)
     python superbrain.py skillopt status
     python superbrain.py skillopt self-evolve --epochs 3
     python superbrain.py skillopt optimize --skill-path PATH --epochs 3
     python superbrain.py skillopt history
     python superbrain.py skillopt rejected
 
-    # Execution trace recording (v2.0.0+)
+    # Temporal memory (v2.1.0)
+    python superbrain.py memory add --type fact --content "..." --valid-from 2023-01-01 --valid-until 2025-12-31
+    python superbrain.py memory add --type fact --content "new fact" --replaces mem_xxx
+    python superbrain.py memory search "query" --min-score 0.3
     python superbrain.py trace record --command "memory add" --input '{"content": "..."}'
     python superbrain.py trace feedback --trace-id ID --rating satisfied
     python superbrain.py trace list [--limit N]
@@ -68,7 +72,8 @@ from sb_core import (
 from sb_memory import (
     add_memory, get_memory, list_memories, update_memory, delete_memory,
     merge_memories, search, get_context, get_stats as get_mem_stats,
-    MEMORY_TYPES
+    MEMORY_TYPES, auto_store, fuzzy_correct_query, learn_expression,
+    get_expression_profile, search_with_correction
 )
 from sb_graph import (
     add_node, add_edge, find_node, list_nodes, list_edges, query_graph,
@@ -86,6 +91,30 @@ from sb_skillopt import (
     get_rejected_buffer, rollback_skillopt, skillopt_status,
     get_default_validation_tasks
 )
+# v3.0.0 imports
+from sb_perception import (
+    should_learn_or_query, information_value_assessment, get_perception_stats,
+    batch_perceive
+)
+from sb_pipeline import (
+    classify_content, compute_decay_factor, should_archive, get_pipeline_stats
+)
+from sb_reasoning import (
+    extract_key_points, analyze_logic, derive_conclusion, assist_decision,
+    get_reasoning_stats
+)
+from sb_entanglement import (
+    mine_entanglement, reinforce_links, build_entanglement_field,
+    query_entanglement, get_entanglement_stats
+)
+from sb_context import (
+    topic_cluster, trace_thread, cross_session_recall, get_topic_context,
+    get_context_stats
+)
+from sb_longterm import (
+    auto_ingest, cross_session_associate, zero_cost_retrieve, build_index,
+    get_longterm_stats
+)
 
 
 def cmd_init(args):
@@ -100,7 +129,7 @@ def cmd_init(args):
 
 
 def cmd_memory_add(args):
-    """Add a new memory."""
+    """Add a new memory. v2.1.0: supports --valid-from/--valid-until/--replaces."""
     attrs = {}
     if args.category:
         attrs["category"] = args.category
@@ -116,7 +145,10 @@ def cmd_memory_add(args):
         confidence=args.confidence,
         source=args.source,
         attributes=attrs if attrs else None,
-        tags=args.tags.split(",") if args.tags else None
+        tags=args.tags.split(",") if args.tags else None,
+        valid_from=args.valid_from,      # v2.1.0
+        valid_until=args.valid_until,    # v2.1.0
+        replaces=args.replaces           # v2.1.0
     )
     print(f"Memory added: {memory['id']}")
     print_json(memory)
@@ -174,7 +206,9 @@ def cmd_memory_update(args):
         content=args.content,
         confidence=args.confidence,
         status=args.status,
-        attributes=attrs
+        attributes=attrs,
+        valid_from=args.valid_from,      # v2.1.0
+        valid_until=args.valid_until     # v2.1.0
     )
     if updated:
         print(f"Memory updated: {updated['id']}")
@@ -205,8 +239,8 @@ def cmd_memory_merge(args):
 
 
 def cmd_memory_context(args):
-    """Get context for injection."""
-    ctx = get_context(args.query, limit=args.limit)
+    """Get context for injection. v2.1.0: supports --min-score."""
+    ctx = get_context(args.query, limit=args.limit, min_score=args.min_score)
     print_json(ctx)
 
 
@@ -363,8 +397,11 @@ def cmd_stats(args):
 def cmd_version(args):
     """Show version information."""
     config = load_config()
-    print(f"SuperBrain version {config.get('version', '1.0.0')}")
-    print(f"Release date: 2026-06-27")
+    print(f"SuperBrain version {config.get('version', '3.0.0')}")
+    print(f"Release date: 2026-06-29")
+    print(f"Features: memory (v3.0 auto-store+correct+expression), search (v3.0 ternary hash+fuzzy), "
+          f"perception (v3.0), pipeline (v3.0), reasoning (v3.0), entanglement (v3.0), "
+          f"context (v3.0), longterm (v3.0), self-check (v2.1 temporal), SkillOpt, traces, workspace isolation")
     print(f"Data directory: {config.get('data_dir', DEFAULT_DATA_DIR)}")
     print(f"Current workspace: {config.get('current_workspace', 'default')}")
 
@@ -554,6 +591,182 @@ def cmd_trace_export(args):
     print(f"Traces exported to: {output_path}")
 
 
+# === v3.0.0 Commands ===
+
+def cmd_memory_auto_store(args):
+    """Auto-store important information from text."""
+    result = auto_store(args.text, source_session=args.source, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_memory_correct(args):
+    """Fuzzy-correct a query for typos and wording."""
+    result = fuzzy_correct_query(args.query, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_memory_learn_expr(args):
+    """Learn a user expression pattern."""
+    result = learn_expression(args.input, args.standard, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_memory_search_corrected(args):
+    """Search with automatic typo correction."""
+    results = search_with_correction(args.query, limit=args.limit, workspace=args.workspace)
+    if not results:
+        print("No matching memories found.")
+        return
+    print(f"Found {len(results)} matching memories:")
+    for mem, score, match_type in results:
+        print(f"\n  [{match_type}] Score: {score:.3f} | ID: {mem['id']}")
+        print(f"  Type: {mem['type']} | Entity: {mem['entity']}")
+        print(f"  Content: {mem['content']}")
+
+
+def cmd_perceive(args):
+    """Perception: determine learn vs query."""
+    result = should_learn_or_query(args.text, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_perceive_batch(args):
+    """Batch perception analysis."""
+    import json as json_mod
+    messages = json_mod.loads(args.messages) if args.messages else []
+    result = batch_perceive(messages, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_perceive_stats(args):
+    """Perception statistics."""
+    print_json(get_perception_stats(args.workspace))
+
+
+def cmd_pipeline_classify(args):
+    """Classify content as definition/chitchat."""
+    result = classify_content(args.text)
+    print_json(result)
+
+
+def cmd_pipeline_stats(args):
+    """Pipeline statistics."""
+    print_json(get_pipeline_stats(args.workspace))
+
+
+def cmd_reason_extract(args):
+    """Extract key points from text."""
+    result = extract_key_points(args.text, max_points=args.max_points)
+    print_json(result)
+
+
+def cmd_reason_analyze(args):
+    """Analyze logical structure of text."""
+    result = analyze_logic(args.text)
+    print_json(result)
+
+
+def cmd_reason_conclude(args):
+    """Derive conclusion from memories."""
+    result = derive_conclusion(args.query, workspace=args.workspace, max_premises=args.max_premises)
+    print_json(result)
+
+
+def cmd_reason_decide(args):
+    """Assist decision-making."""
+    import json as json_mod
+    options = json_mod.loads(args.options) if args.options else []
+    result = assist_decision(options, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_entangle_mine(args):
+    """Mine entanglement for a concept."""
+    result = mine_entanglement(args.concept, workspace=args.workspace, min_strength=args.min_strength)
+    print_json(result)
+
+
+def cmd_entangle_build(args):
+    """Build the entanglement field."""
+    result = build_entanglement_field(workspace=args.workspace, min_strength=args.min_strength)
+    print_json(result)
+
+
+def cmd_entangle_query(args):
+    """Query entanglement for a search query."""
+    result = query_entanglement(args.query, workspace=args.workspace, max_results=args.max_results)
+    print_json(result)
+
+
+def cmd_entangle_reinforce(args):
+    """Reinforce a link between two tokens."""
+    result = reinforce_links(args.token1, args.token2, strength=args.strength, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_entangle_stats(args):
+    """Entanglement field statistics."""
+    print_json(get_entanglement_stats(args.workspace))
+
+
+def cmd_context_cluster(args):
+    """Cluster memories by topic."""
+    result = topic_cluster(workspace=args.workspace, min_similarity=args.min_similarity)
+    print_json(result)
+
+
+def cmd_context_trace(args):
+    """Trace a conversation thread."""
+    result = trace_thread(args.topic, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_context_recall(args):
+    """Cross-session recall."""
+    result = cross_session_recall(args.query, workspace=args.workspace, days_back=args.days_back)
+    print_json(result)
+
+
+def cmd_context_topic(args):
+    """Get topic context."""
+    result = get_topic_context(args.topic, workspace=args.workspace, limit=args.limit)
+    print_json(result)
+
+
+def cmd_context_stats(args):
+    """Context memory statistics."""
+    print_json(get_context_stats(args.workspace))
+
+
+def cmd_longterm_ingest(args):
+    """Auto-ingest: dialogue as storage."""
+    result = auto_ingest(args.text, source_session=args.source, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_longterm_index(args):
+    """Build retrieval index."""
+    result = build_index(workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_longterm_retrieve(args):
+    """Zero-cost retrieval."""
+    result = zero_cost_retrieve(args.query, workspace=args.workspace, limit=args.limit)
+    print_json(result)
+
+
+def cmd_longterm_associate(args):
+    """Cross-session association."""
+    result = cross_session_associate(args.memory_id, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_longterm_stats(args):
+    """Long-term memory statistics."""
+    print_json(get_longterm_stats(args.workspace))
+
+
 def build_parser():
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
@@ -580,6 +793,9 @@ def build_parser():
     sp.add_argument("--category", help="Category attribute")
     sp.add_argument("--scope", help="Scope attribute (global/project/workspace)")
     sp.add_argument("--tags", help="Comma-separated tags")
+    sp.add_argument("--valid-from", help="Temporal: when this fact became true (ISO date, e.g. 2023-01-01) (v2.1.0)")
+    sp.add_argument("--valid-until", help="Temporal: when this fact ceased to be true (ISO date) (v2.1.0)")
+    sp.add_argument("--replaces", help="Memory ID this one supersedes (v2.1.0)")
     sp.set_defaults(func=cmd_memory_add)
 
     # memory list
@@ -601,6 +817,7 @@ def build_parser():
     sp = mem_sub.add_parser("search", help="Search memories")
     sp.add_argument("query", help="Search query")
     sp.add_argument("--limit", type=int, default=10, help="Max results")
+    sp.add_argument("--min-score", type=float, help="Minimum score filter (v2.1.0)")
     sp.set_defaults(func=cmd_memory_search)
 
     # memory update
@@ -608,8 +825,10 @@ def build_parser():
     sp.add_argument("--id", required=True, help="Memory ID")
     sp.add_argument("--content", help="New content")
     sp.add_argument("--confidence", type=float, help="New confidence score")
-    sp.add_argument("--status", choices=["active", "archived", "deprecated"], help="New status")
+    sp.add_argument("--status", choices=["active", "archived", "deprecated", "superseded"], help="New status")
     sp.add_argument("--category", help="New category")
+    sp.add_argument("--valid-from", help="Update temporal valid_from (v2.1.0)")
+    sp.add_argument("--valid-until", help="Update temporal valid_until (v2.1.0)")
     sp.set_defaults(func=cmd_memory_update)
 
     # memory delete
@@ -627,6 +846,7 @@ def build_parser():
     sp = mem_sub.add_parser("context", help="Get context for injection (token-optimized)")
     sp.add_argument("query", help="Context query")
     sp.add_argument("--limit", type=int, default=5, help="Max memories in context")
+    sp.add_argument("--min-score", type=float, help="Minimum score filter (v2.1.0)")
     sp.set_defaults(func=cmd_memory_context)
 
     # memory stats
@@ -787,6 +1007,180 @@ def build_parser():
     sp.add_argument("--output", help="Output file path")
     sp.add_argument("--workspace", help="Workspace name")
     sp.set_defaults(func=cmd_trace_export)
+
+    # === v3.0.0 Subparsers ===
+
+    # memory auto-store
+    sp = mem_sub.add_parser("auto-store", help="Auto-store important info from text (v3.0.0)")
+    sp.add_argument("--text", required=True, help="Text to extract and store")
+    sp.add_argument("--source", help="Source session identifier")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_memory_auto_store)
+
+    # memory correct
+    sp = mem_sub.add_parser("correct", help="Fuzzy-correct a query (v3.0.0)")
+    sp.add_argument("query", help="Query to correct")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_memory_correct)
+
+    # memory learn-expr
+    sp = mem_sub.add_parser("learn-expr", help="Learn user expression pattern (v3.0.0)")
+    sp.add_argument("--input", required=True, help="User's actual phrasing")
+    sp.add_argument("--standard", help="Standard/canonical form (optional)")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_memory_learn_expr)
+
+    # memory search-corrected
+    sp = mem_sub.add_parser("search-corrected", help="Search with typo correction (v3.0.0)")
+    sp.add_argument("query", help="Search query")
+    sp.add_argument("--limit", type=int, default=10, help="Max results")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_memory_search_corrected)
+
+    # perceive
+    sp_perceive = subparsers.add_parser("perceive", help="Perception: learn vs query (v3.0.0)")
+    perceive_sub = sp_perceive.add_subparsers(dest="perceive_command")
+
+    sp = perceive_sub.add_parser("check", help="Check if text should be learned or queried")
+    sp.add_argument("--text", required=True, help="Text to analyze")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_perceive)
+
+    sp = perceive_sub.add_parser("batch", help="Batch perception analysis")
+    sp.add_argument("--messages", help="JSON array of messages")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_perceive_batch)
+
+    sp = perceive_sub.add_parser("stats", help="Perception statistics")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_perceive_stats)
+
+    # pipeline
+    sp_pipeline = subparsers.add_parser("pipeline", help="Classification pipeline (v3.0.0)")
+    pipeline_sub = sp_pipeline.add_subparsers(dest="pipeline_command")
+
+    sp = pipeline_sub.add_parser("classify", help="Classify content")
+    sp.add_argument("--text", required=True, help="Text to classify")
+    sp.set_defaults(func=cmd_pipeline_classify)
+
+    sp = pipeline_sub.add_parser("stats", help="Pipeline statistics")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_pipeline_stats)
+
+    # reason
+    sp_reason = subparsers.add_parser("reason", help="Reasoning engine (v3.0.0)")
+    reason_sub = sp_reason.add_subparsers(dest="reason_command")
+
+    sp = reason_sub.add_parser("extract", help="Extract key points from text")
+    sp.add_argument("--text", required=True, help="Text to analyze")
+    sp.add_argument("--max-points", type=int, default=5, help="Max key points")
+    sp.set_defaults(func=cmd_reason_extract)
+
+    sp = reason_sub.add_parser("analyze", help="Analyze logical structure")
+    sp.add_argument("--text", required=True, help="Text to analyze")
+    sp.set_defaults(func=cmd_reason_analyze)
+
+    sp = reason_sub.add_parser("conclude", help="Derive conclusion from memories")
+    sp.add_argument("query", help="Query to derive conclusion for")
+    sp.add_argument("--max-premises", type=int, default=5, help="Max premises")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_reason_conclude)
+
+    sp = reason_sub.add_parser("decide", help="Assist decision-making")
+    sp.add_argument("--options", help="JSON array of options")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_reason_decide)
+
+    # entangle
+    sp_entangle = subparsers.add_parser("entangle", help="Entanglement field (v3.0.0)")
+    entangle_sub = sp_entangle.add_subparsers(dest="entangle_command")
+
+    sp = entangle_sub.add_parser("mine", help="Mine entanglement for a concept")
+    sp.add_argument("concept", help="Concept to mine")
+    sp.add_argument("--min-strength", type=float, default=0.1, help="Minimum strength")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_entangle_mine)
+
+    sp = entangle_sub.add_parser("build", help="Build the entanglement field")
+    sp.add_argument("--min-strength", type=float, default=0.1, help="Minimum strength")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_entangle_build)
+
+    sp = entangle_sub.add_parser("query", help="Query entanglement")
+    sp.add_argument("query", help="Search query")
+    sp.add_argument("--max-results", type=int, default=10, help="Max results")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_entangle_query)
+
+    sp = entangle_sub.add_parser("reinforce", help="Reinforce a link")
+    sp.add_argument("--token1", required=True, help="First token")
+    sp.add_argument("--token2", required=True, help="Second token")
+    sp.add_argument("--strength", type=float, default=0.1, help="Reinforcement strength")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_entangle_reinforce)
+
+    sp = entangle_sub.add_parser("stats", help="Entanglement statistics")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_entangle_stats)
+
+    # context
+    sp_context = subparsers.add_parser("context-mem", help="Context memory (v3.0.0)")
+    context_sub = sp_context.add_subparsers(dest="context_command")
+
+    sp = context_sub.add_parser("cluster", help="Cluster memories by topic")
+    sp.add_argument("--min-similarity", type=float, default=0.3, help="Min similarity for clustering")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_context_cluster)
+
+    sp = context_sub.add_parser("trace", help="Trace a conversation thread")
+    sp.add_argument("topic", help="Topic or memory ID to trace")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_context_trace)
+
+    sp = context_sub.add_parser("recall", help="Cross-session recall")
+    sp.add_argument("query", help="Query for recall")
+    sp.add_argument("--days-back", type=int, help="How many days to look back")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_context_recall)
+
+    sp = context_sub.add_parser("topic", help="Get topic context")
+    sp.add_argument("topic", help="Topic to get context for")
+    sp.add_argument("--limit", type=int, default=10, help="Max memories")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_context_topic)
+
+    sp = context_sub.add_parser("stats", help="Context memory statistics")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_context_stats)
+
+    # longterm
+    sp_longterm = subparsers.add_parser("longterm", help="Long-term memory (v3.0.0)")
+    longterm_sub = sp_longterm.add_subparsers(dest="longterm_command")
+
+    sp = longterm_sub.add_parser("ingest", help="Auto-ingest: dialogue as storage")
+    sp.add_argument("--text", required=True, help="Text to ingest")
+    sp.add_argument("--source", help="Source session identifier")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_longterm_ingest)
+
+    sp = longterm_sub.add_parser("index", help="Build retrieval index")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_longterm_index)
+
+    sp = longterm_sub.add_parser("retrieve", help="Zero-cost retrieval")
+    sp.add_argument("query", help="Query to retrieve")
+    sp.add_argument("--limit", type=int, default=5, help="Max results")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_longterm_retrieve)
+
+    sp = longterm_sub.add_parser("associate", help="Cross-session association")
+    sp.add_argument("--memory-id", required=True, help="Memory ID to associate")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_longterm_associate)
+
+    sp = longterm_sub.add_parser("stats", help="Long-term memory statistics")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_longterm_stats)
 
     return parser
 

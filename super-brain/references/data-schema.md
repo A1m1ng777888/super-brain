@@ -20,9 +20,13 @@ Stored in `workspaces/{workspace}/memories.json` as a JSON array.
   "confidence": 0.95,
   "last_accessed": "2026-06-26T14:30:00",
   "access_count": 0,
-  "status": "active | archived | deprecated",
+  "status": "active | archived | deprecated | superseded",
   "simhash": 1126685795764943806,
-  "related_nodes": ["node_001", "node_002"]
+  "related_nodes": ["node_001", "node_002"],
+  "valid_from": "2023-01-01",
+  "valid_until": "2025-12-31",
+  "replaces": "mem_xxx",
+  "replaced_by": "mem_yyy"
 }
 ```
 
@@ -40,9 +44,31 @@ Stored in `workspaces/{workspace}/memories.json` as a JSON array.
 | `confidence` | float | 0.0-1.0, how certain this memory is |
 | `last_accessed` | ISO 8601 | Last time this memory was retrieved |
 | `access_count` | int | How many times retrieved |
-| `status` | enum | active (in use), archived (deprecated), deprecated (superseded) |
+| `status` | enum | active (in use), archived (deprecated), deprecated (superseded), superseded (replaced by newer memory) |
 | `simhash` | int | 64-bit SimHash fingerprint of content for fast similarity |
 | `related_nodes` | array | Knowledge graph node IDs related to this memory |
+| `valid_from` | ISO date | (v2.1.0) When the fact became true in reality, e.g. "2023-01-01" |
+| `valid_until` | ISO date | (v2.1.0) When the fact ceased to be true, null = still ongoing |
+| `replaces` | string | (v2.1.0) Memory ID this memory supersedes |
+| `replaced_by` | string | (v2.1.0) Memory ID that superseded this memory |
+
+### Temporal Validity (v2.1.0)
+
+The dual-time mechanism tracks two independent timelines:
+
+| Timeline | Field | Description |
+|----------|-------|-------------|
+| **Fact validity** | `valid_from` / `valid_until` | When the fact was/is true in the real world |
+| **System tracking** | `timestamp` / `status` / `replaces` / `replaced_by` | When the system learned about it and its lifecycle |
+
+**Example — tracking a fact change:**
+```
+Memory A: valid_from=2023-01-01, valid_until=2025-06-15, status=superseded, replaced_by=mem_B
+Memory B: valid_from=2025-06-15, valid_until=null, status=active, replaces=mem_A
+```
+
+**Conflict detection:** When `valid_from` is provided and temporal config is enabled,
+the system checks for overlapping time ranges on the same entity+type and warns.
 
 ### Memory Types
 
@@ -177,3 +203,41 @@ Stored in `health/latest_report.json`.
   "auto_fixed": 0
 }
 ```
+
+---
+
+## Search & Dynamic Threshold (v2.1.0)
+
+### Scoring Pipeline
+
+```
+Query → Tokenize → SimHash coarse (+ TF-IDF + Keyword) → Combined score
+                                                              ↓
+                                              Dynamic quality line = max(0.10, min(0.30, top_score × 0.50))
+                                                              ↓
+                                                        Filter & return
+```
+
+### Dynamic Threshold Config
+
+```json
+{
+  "search": {
+    "dynamic_threshold": true,
+    "base_quality_line": 0.10,
+    "max_quality_line": 0.30,
+    "score_ratio": 0.50,
+    "coarse_filter_threshold": 0.02
+  }
+}
+```
+
+### How It Works
+
+Instead of a fixed `similarity_threshold`, the quality line adapts to each query:
+- **High-quality query** (top score 0.80) → quality line = 0.30 → only highly relevant results pass
+- **Medium query** (top score 0.40) → quality line = 0.20 → moderate filtering
+- **Niche query** (top score 0.15) → quality line = 0.10 → floor, allows weak matches through
+
+This ensures the bar rises with result quality — you never get false positives on good queries,
+and you never get zero results on niche queries.
