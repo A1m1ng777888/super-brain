@@ -337,10 +337,15 @@ def cmd_selfcheck(args):
         status_icon = "[OK]" if check["status"] == "healthy" else "[!]"
         print(f"  {status_icon} {check_name}: {check['issues_found']} issues")
         if check["status"] != "healthy" and check.get("details"):
-            for detail in check["details"][:3]:
-                print(f"      - {json.dumps(detail, ensure_ascii=False)[:120]}")
-            if len(check["details"]) > 3:
-                print(f"      ... and {len(check['details']) - 3} more")
+            details = check["details"]
+            if isinstance(details, list):
+                for detail in details[:3]:
+                    print(f"      - {json.dumps(detail, ensure_ascii=False)[:120]}")
+                if len(details) > 3:
+                    print(f"      ... and {len(details) - 3} more")
+            elif isinstance(details, dict):
+                for k, v in details.items():
+                    print(f"      - {k}: {v}")
     print(f"\n  Recommendation: {result['checks'].get('duplicates', {}).get('recommendation', '')}")
 
 
