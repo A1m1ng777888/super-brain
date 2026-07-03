@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.3.0] — 2026-07-03
+
+### 新增 — Goal Continuation 续跑机制
+
+让编排器在任务未完成时自动继续——不靠 LLM 自由文本判断，靠结构化数据 + SHA256 签名比较。
+
+- **结构化目标评估**：`evaluate_goal_completion()` 基于 sub_results 的 status 字段判断，不消耗额外 LLM 调用
+- **四道闸门**：`should_continue_goal()` 目标达成→停止 / 最大续跑(4次)→停止 / abort 标记→停止 / SHA256 停滞检测→停止
+- **停滞检测**：`_hash_results()` 对子任务结果做 SHA256 签名，与前一轮比较，完全相同 = 停滞
+- **零 LLM 开销**：整个续跑判断链只用已有结构化字段 + 微秒级哈希比较，不需要额外模型调用
+- **CLI 新增**：`orchestrate evaluate / continue / goal-status / continuation-reset`
+- **测试**：12 项新测试，累计 88 项全部通过
+
+### 修复 — 安全与隐私
+
+- `sb_obsidian.py`：移除硬编码的本地 Obsidian vault 路径，改为 `OBSIDIAN_VAULT_PATH` 环境变量
+- `superbrain.py`：CLI 帮助文本同步更新
+- `LICENSE`：署名从模糊的"Super Brain Contributors"改为 `A1m1ng777888`
+- 全部 19 个 Python 文件：添加 `Copyright (c) 2026 A1m1ng777888` + `Author` 署名
+- `SKILL.md`：frontmatter 新增 `author` 和 `license` 字段
+
 ## [3.2.2] — 2026-07-02
 
 ### 升级 — 前置评估 Ambient
