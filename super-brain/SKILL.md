@@ -1,7 +1,7 @@
 ---
 name: super-brain
-version: v3.2.2
-released: 2026-07-02
+version: v3.3.0
+released: 2026-07-03
 author: A1m1ng777888
 license: MIT
 description: "Super Brain 超脑认知增强技能 v3.2.2。前置编配评估已提升至 SOUL.md 始终在线（不需加载本 skill 即可自主判断任务复杂度），本 skill 负责正式评估+分解+规格生成+执行。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、remember、recall、reason、entangle、perceive、之前、上次、那个、我们聊过、你之前说、别忘了、还有没有、相关的内容、帮我回忆、继续上次"
