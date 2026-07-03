@@ -1,16 +1,18 @@
 # Super Brain (超脑) — AI Agent 认知增强系统
 
-[![Version](https://img.shields.io/badge/version-3.0.1-blue)](https://github.com/A1m1ng777888/super-brain)
+[![Version](https://img.shields.io/badge/version-3.2.2-blue)](https://github.com/A1m1ng777888/super-brain)
 [![Python](https://img.shields.io/badge/python-3.8+-green)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-181%20PASS-brightgreen)](super-brain/scripts/test_v3.py)
-[![Architecture](https://img.shields.io/badge/architecture-5%E5%B1%8416%E6%A8%A1%E5%9D%97-orange)](super-brain/references/architecture.md)
+[![Tests](https://img.shields.io/badge/tests-76%20PASS-brightgreen)](super-brain/scripts/test_v3.py)
+[![Architecture](https://img.shields.io/badge/architecture-5%E5%B1%8417%E6%A8%A1%E5%9D%97-orange)](super-brain/references/architecture.md)
 
-为 AI Agent 提供**持久记忆、知识图谱、语义搜索、自动推理、关联挖掘、对话即入库、分类管线、感知增强**八大核心能力，构建从感知到存储的完整认知增强闭环。
+为 AI Agent 提供**持久记忆、知识图谱、语义搜索、自动推理、关联挖掘、对话即入库、分类管线、感知增强、子Agent编排**九大核心能力，构建从感知到执行编排的完整认知增强闭环。
 
-> **v3.0.1**：被动触发修复 — SKILL.md 新增 12 个自然语言触发词 + 8 种场景命令映射表，USER.md/SOUL.md 注入超脑主动使用约定。
+> **v3.2.2**：前置编配评估提升至 SOUL.md 始终在线 — Agent 收到任何任务时自主判断是否需要子Agent编配，不需用户说"拆"。
 >
-> **v3.0.0**：五层十六模块架构重构 — 三进制哈希字词网络、六通道融合搜索、分类管线、感知增强、推理引擎、纠缠场、上下文记忆、本地长期记忆。
+> **v3.2.0**：子Agent编排器 — 4维度复杂度评估 + 任务分解 + 6套工具画像 + 预算熔断 + 失败隔离。
+>
+> **v3.1.0**：反污染规则 + Obsidian双向同步 + 冷启动门控 + 退场生命周期 + 会话生命周期协议。
 
 ---
 
@@ -49,6 +51,11 @@
 | **分类管线** | 定义类(365天)/闲聊类(7天)/混合类(90天)差异化衰减 | v3.0 |
 | **本地长期记忆** | 对话即入库 + 零成本 O(1) 检索 + 预计算索引 | v3.0 |
 | **三进制哈希字词网络** | 3^64 状态空间，~1.9 万倍区分力提升 | v3.0 |
+| **反污染规则** | confidence<0.7 决策不过库、未解决错误不过库、SimHash≥0.92 去重 | v3.1 |
+| **Obsidian 双向同步** | JSON→.md+[[wikilinks]] 导出 + 反向同步回写 | v3.1 |
+| **冷启动门控** | memory<15 AND session<3 → 仅感知+存储，达标后自动激活 | v3.1 |
+| **会话生命周期协议** | T1 启动(搜索+简报) / T2 收尾(反污染+入库) / T3 定期(7维健康扫描) | v3.1 |
+| **子Agent编排器** | 4维度评估 + 任务分解 + 6套工具画像 + 预算熔断 + 失败隔离 | v3.2 |
 | **Workspace 隔离** | 多项目独立知识空间，互不干扰 | v1.0 |
 | **Token 优化** | 上下文压缩、按需加载、零成本检索 | v1.0 |
 | **零依赖** | 纯 Python 标准库，无需 pip install | v1.0 |
@@ -444,11 +451,16 @@ python test_v3.py           # v3 新功能测试 (61项)
 | 优先级 | 功能 | 状态 |
 |--------|------|------|
 | ~~P0~~ | ~~SkillOpt 自我进化引擎~~ | v2.0.0 已完成 |
+| ~~P0~~ | ~~反污染规则~~ | v3.1.0 已完成 |
+| ~~P0~~ | ~~子Agent编排器~~ | v3.2.0 已完成 |
 | ~~P1~~ | ~~感知增强系统~~ | v3.0.0 已完成 |
 | ~~P1~~ | ~~本地长期记忆~~ | v3.0.0 已完成 |
 | ~~P1~~ | ~~三进制哈希字词网络~~ | v3.0.0 已完成 |
 | ~~P1~~ | ~~被动触发修复~~ | v3.0.1 已完成 |
-| P2 | 向量化检索升级（可选嵌入模型） | 规划中 |
+| ~~P1~~ | ~~Obsidian 双向同步~~ | v3.1.0 已完成 |
+| ~~P1~~ | ~~冷启动门控~~ | v3.1.0 已完成 |
+| ~~P2~~ | ~~退场生命周期~~ | v3.1.0 已完成 |
+| ~~P2~~ | ~~会话生命周期协议~~ | v3.1.0 已完成 |
 | P3 | Token 监测仪表盘 | 规划中 |
 | P4 | 多模态记忆（图片/文件摘要） | 规划中 |
 | P5 | 记忆导出/跨设备同步 | 规划中 |
@@ -497,9 +509,13 @@ results = search_memories("记忆", limit=5)
 |------|------|--------|
 | v1.0.0 | 2026-06-26 | 初始发布：记忆引擎 + 知识图谱 + SimHash 搜索 + 自检系统 |
 | v2.0.0 | 2026-06-27 | SkillOpt 自我进化引擎 + 执行轨迹记录 |
-| v2.1.0 | 2026-06-28 | 记忆双时间机制 + 动态阈值检索（未单独发布，合入 v3.0.1） |
+| v2.1.0 | 2026-06-28 | 记忆双时间机制 + 动态阈值检索 |
 | v3.0.0 | 2026-06-29 | 五层十六模块重构：八大新能力 |
 | v3.0.1 | 2026-07-02 | 被动触发修复：自然语言触发词 + 场景映射表 |
+| v3.1.0 | 2026-07-02 | 五大升级：反污染 + Obsidian 同步 + 冷启动 + 退场 + 会话生命周期 |
+| v3.2.0 | 2026-07-02 | 子Agent编排器：4维评估 + 任务分解 + 6画像 + 预算熔断 |
+| v3.2.1 | 2026-07-02 | 前置编配评估协议：隐含范围识别 + 域感知Token预估 |
+| v3.2.2 | 2026-07-02 | 前置评估提升至 SOUL.md 始终在线 |
 
 详见 [CHANGELOG.md](CHANGELOG.md)。
 

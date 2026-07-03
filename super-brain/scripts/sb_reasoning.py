@@ -21,9 +21,69 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sb_core import read_memories, read_graph
+from sb_core import read_memories, read_graph, read_meta, update_meta
 from sb_search import tokenize, tf_idf_cosine_similarity, keyword_match_score
 from sb_graph import find_node, query_graph
+
+
+# v3.1.0: Cold start gating thresholds
+WARMUP_MEMORY_THRESHOLD = 15      # Min active memories needed
+WARMUP_SESSION_THRESHOLD = 3      # Min sessions needed
+
+
+def check_warmup_mode(workspace=None):
+    """
+    v3.1.0: Check if the system is still in cold start (warmup) mode.
+    
+    In warmup mode, only perception + storage are active.
+    Reasoning, entanglement, and pattern extraction are disabled
+    until enough data has accumulated.
+    
+    Returns:
+        dict with:
+        - mode: "warmup" | "active"
+        - memory_count: int
+        - session_count: int
+        - ready: bool
+        - missing: list of what's still needed
+    """
+    memories = read_memories(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+    memory_count = len(active)
+    
+    meta = read_meta(workspace)
+    session_count = meta.get("session_count", 0)
+    
+    missing = []
+    if memory_count < WARMUP_MEMORY_THRESHOLD:
+        missing.append(f"need {WARMUP_MEMORY_THRESHOLD - memory_count} more memories")
+    if session_count < WARMUP_SESSION_THRESHOLD:
+        missing.append(f"need {WARMUP_SESSION_THRESHOLD - session_count} more sessions")
+    
+    ready = not bool(missing)
+    
+    if ready and meta.get("mode") != "active":
+        update_meta("mode", "active", workspace)
+    elif not ready and meta.get("mode") != "warmup":
+        update_meta("mode", "warmup", workspace)
+    
+    return {
+        "mode": "active" if ready else "warmup",
+        "memory_count": memory_count,
+        "session_count": session_count,
+        "thresholds": {
+            "memory": WARMUP_MEMORY_THRESHOLD,
+            "session": WARMUP_SESSION_THRESHOLD
+        },
+        "ready": ready,
+        "missing": missing if missing else None
+    }
+
+
+def _is_warmup(workspace=None):
+    """Quick warmup check for internal gating."""
+    result = check_warmup_mode(workspace)
+    return result["mode"] == "warmup"
 
 
 # Causal patterns (cause → effect)
@@ -260,6 +320,16 @@ def derive_conclusion(query, workspace=None, max_premises=5):
     
     Returns: dict with premises, convergent_points, divergent_points, conclusion
     """
+    # v3.1.0: Cold start gating
+    if _is_warmup(workspace):
+        return {
+            "mode": "warmup",
+            "conclusion": None,
+            "warning": f"Reasoning engine in warmup mode. Need {WARMUP_MEMORY_THRESHOLD} memories and {WARMUP_SESSION_THRESHOLD} sessions.",
+            "premises": [],
+            "convergent_points": [],
+            "divergent_points": []
+        }
     from sb_memory import search
     results = search(query, limit=max_premises * 2, workspace=workspace)
     
@@ -348,6 +418,14 @@ def assist_decision(options, criteria=None, workspace=None):
     
     Returns: dict with scored options and recommendation
     """
+    # v3.1.0: Cold start gating
+    if _is_warmup(workspace):
+        return {
+            "mode": "warmup",
+            "recommendation": None,
+            "warning": f"Reasoning engine in warmup mode. Need {WARMUP_MEMORY_THRESHOLD} memories and {WARMUP_SESSION_THRESHOLD} sessions.",
+            "scores": []
+        }
     if not options:
         return {"error": "No options provided"}
     

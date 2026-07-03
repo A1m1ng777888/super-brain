@@ -97,7 +97,8 @@ from sb_perception import (
     batch_perceive
 )
 from sb_pipeline import (
-    classify_content, compute_decay_factor, should_archive, get_pipeline_stats
+    classify_content, compute_decay_factor, should_archive, get_pipeline_stats,
+    cleanup_memories
 )
 from sb_reasoning import (
     extract_key_points, analyze_logic, derive_conclusion, assist_decision,
@@ -114,6 +115,14 @@ from sb_context import (
 from sb_longterm import (
     auto_ingest, cross_session_associate, zero_cost_retrieve, build_index,
     get_longterm_stats
+)
+
+# v3.2.0 imports
+from sb_orchestrator import (
+    should_orchestrate, decompose_task, generate_sub_agent_specs,
+    get_orchestration_stats, reset_circuit_breaker, orchestrate,
+    select_minimal_tools, TOOL_PROFILES, record_spawn, record_complete,
+    record_failure, run_tests as run_orch_tests
 )
 
 
@@ -397,11 +406,15 @@ def cmd_stats(args):
 def cmd_version(args):
     """Show version information."""
     config = load_config()
-    print(f"SuperBrain version {config.get('version', '3.0.0')}")
-    print(f"Release date: 2026-06-29")
-    print(f"Features: memory (v3.0 auto-store+correct+expression), search (v3.0 ternary hash+fuzzy), "
-          f"perception (v3.0), pipeline (v3.0), reasoning (v3.0), entanglement (v3.0), "
-          f"context (v3.0), longterm (v3.0), self-check (v2.1 temporal), SkillOpt, traces, workspace isolation")
+    print(f"SuperBrain version {config.get('version', '3.2.2')}")
+    print(f"Release date: 2026-07-02")
+    print(f"Features: memory (v3.1 anti-pollution), search (v3.0 ternary hash+fuzzy), "
+          f"perception (v3.0), pipeline (v3.1 cleanup), reasoning (v3.1 warmup), "
+          f"entanglement (v3.1 warmup), context (v3.0), longterm (v3.0), "
+          f"obsidian (v3.1 export+sync), session (v3.1 T1+T2+T3), "
+          f"orchestrator (v3.2 sub-agent decomposition, "
+          f"v3.2.1 implicit scope detection, v3.2.2 ambient via SOUL.md), "
+          f"self-check (v2.1 temporal), SkillOpt, traces, workspace isolation")
     print(f"Data directory: {config.get('data_dir', DEFAULT_DATA_DIR)}")
     print(f"Current workspace: {config.get('current_workspace', 'default')}")
 
@@ -654,6 +667,12 @@ def cmd_pipeline_stats(args):
     print_json(get_pipeline_stats(args.workspace))
 
 
+def cmd_pipeline_cleanup(args):
+    """Clean up decayed memories."""
+    result = cleanup_memories(args.workspace, dry_run=args.dry_run, force=args.force)
+    print_json(result)
+
+
 def cmd_reason_extract(args):
     """Extract key points from text."""
     result = extract_key_points(args.text, max_points=args.max_points)
@@ -765,6 +784,125 @@ def cmd_longterm_associate(args):
 def cmd_longterm_stats(args):
     """Long-term memory statistics."""
     print_json(get_longterm_stats(args.workspace))
+
+
+# v3.1.0: Session lifecycle handlers
+def cmd_session_start(args):
+    """T1: Session start briefing."""
+    from sb_core import session_start
+    print_json(session_start(args.workspace))
+
+
+def cmd_session_end(args):
+    """T2: Session end wrap-up."""
+    from sb_core import session_end
+    print_json(session_end(args.workspace))
+
+
+def cmd_session_health(args):
+    """T3: Periodic 7-dimension health scan."""
+    from sb_core import periodic_health_check
+    print_json(periodic_health_check(args.workspace))
+
+
+# v3.1.0: Obsidian sync handlers
+def cmd_obsidian_export(args):
+    """Export memories to Obsidian .md + [[wikilinks]]."""
+    from sb_obsidian import export_to_obsidian
+    result = export_to_obsidian(
+        workspace=args.workspace,
+        vault_path=getattr(args, 'vault_path', None),
+        include_graph=not getattr(args, 'no_graph', False)
+    )
+    print_json(result)
+
+
+def cmd_obsidian_sync(args):
+    """Reverse sync .md changes back to JSON."""
+    from sb_obsidian import reverse_sync_from_obsidian
+    result = reverse_sync_from_obsidian(
+        workspace=args.workspace,
+        vault_path=getattr(args, 'vault_path', None),
+        dry_run=not getattr(args, 'apply', False)
+    )
+    print_json(result)
+
+
+def cmd_obsidian_stats(args):
+    """Obsidian sync statistics."""
+    from sb_obsidian import get_obsidian_stats
+    print_json(get_obsidian_stats(args.workspace, getattr(args, 'vault_path', None)))
+
+
+# v3.2.0: Orchestrator handlers
+def cmd_orch_assess(args):
+    """Assess task complexity and need for orchestration."""
+    result = should_orchestrate(
+        args.task,
+        current_context_size=getattr(args, 'context_size', 0) or 0,
+        workspace=args.workspace
+    )
+    print_json(result)
+
+
+def cmd_orch_decompose(args):
+    """Decompose a task into independent sub-tasks."""
+    result = decompose_task(args.task, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_orch_spec(args):
+    """Generate complete sub-agent specs for a task."""
+    result = generate_sub_agent_specs(
+        args.task,
+        current_context_size=getattr(args, 'context_size', 0) or 0,
+        workspace=args.workspace
+    )
+    print_json(result)
+
+
+def cmd_orch_spawn(args):
+    """Record spawn of a sub-agent."""
+    result = record_spawn(
+        args.orchestration_id or generate_id("orch"),
+        args.sub_count,
+        args.profiles.split(",") if getattr(args, 'profiles', None) else [],
+        args.task,
+        workspace=args.workspace
+    )
+    print_json(result)
+
+
+def cmd_orch_complete(args):
+    """Record completion of an orchestration."""
+    import json as json_mod
+    results = json_mod.loads(args.results) if args.results else []
+    result = record_complete(args.orchestration_id, results, workspace=args.workspace)
+    print_json({"status": "recorded", "orchestration_id": args.orchestration_id})
+
+
+def cmd_orch_stats(args):
+    """Orchestrator statistics."""
+    print_json(get_orchestration_stats(args.workspace))
+
+
+def cmd_orch_reset(args):
+    """Reset the circuit breaker."""
+    print_json(reset_circuit_breaker(args.workspace))
+
+
+def cmd_orch_profiles(args):
+    """List available tool profiles."""
+    profiles = {
+        name: {
+            "description": p["description"],
+            "subagent_type": p["subagent_type"],
+            "tools": p["tools"],
+            "skills": p.get("skills", [])
+        }
+        for name, p in TOOL_PROFILES.items()
+    }
+    print_json(profiles)
 
 
 def build_parser():
@@ -1067,6 +1205,12 @@ def build_parser():
     sp.add_argument("--workspace", help="Workspace name")
     sp.set_defaults(func=cmd_pipeline_stats)
 
+    sp = pipeline_sub.add_parser("cleanup", help="Clean up decayed memories (v3.1.0)")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.add_argument("--dry-run", action="store_true", help="Report only, no changes")
+    sp.add_argument("--force", action="store_true", help="Skip confirmation")
+    sp.set_defaults(func=cmd_pipeline_cleanup)
+
     # reason
     sp_reason = subparsers.add_parser("reason", help="Reasoning engine (v3.0.0)")
     reason_sub = sp_reason.add_subparsers(dest="reason_command")
@@ -1181,6 +1325,89 @@ def build_parser():
     sp = longterm_sub.add_parser("stats", help="Long-term memory statistics")
     sp.add_argument("--workspace", help="Workspace name")
     sp.set_defaults(func=cmd_longterm_stats)
+
+    # v3.1.0: Session lifecycle protocols
+    sp_session = subparsers.add_parser("session", help="Session lifecycle (v3.1.0)")
+    session_sub = sp_session.add_subparsers(dest="session_command")
+
+    sp = session_sub.add_parser("start", help="T1: Session start briefing")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_session_start)
+
+    sp = session_sub.add_parser("end", help="T2: Session end wrap-up")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_session_end)
+
+    sp = session_sub.add_parser("health", help="T3: Periodic 7-dimension health scan")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_session_health)
+
+    # v3.1.0: Obsidian bidirectional sync
+    sp_obsidian = subparsers.add_parser("obsidian", help="Obsidian sync (v3.1.0)")
+    obsidian_sub = sp_obsidian.add_subparsers(dest="obsidian_command")
+
+    sp = obsidian_sub.add_parser("export", help="Export all memories to .md + [[wikilinks]]")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.add_argument("--vault-path", help="Obsidian vault path (default: E:/AAA本地知识库v1/本地知识库v1)")
+    sp.add_argument("--no-graph", action="store_true", help="Skip graph edges")
+    sp.set_defaults(func=cmd_obsidian_export)
+
+    sp = obsidian_sub.add_parser("sync", help="Reverse sync .md changes back to JSON")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.add_argument("--vault-path", help="Obsidian vault path")
+    sp.add_argument("--apply", action="store_true", help="Apply changes (default: dry-run)")
+    sp.set_defaults(func=cmd_obsidian_sync)
+
+    sp = obsidian_sub.add_parser("stats", help="Obsidian sync statistics")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.add_argument("--vault-path", help="Obsidian vault path")
+    sp.set_defaults(func=cmd_obsidian_stats)
+
+    # v3.2.0: Sub-Agent Orchestrator
+    sp_orch = subparsers.add_parser("orchestrate", help="Sub-agent orchestrator (v3.2.0)")
+    orch_sub = sp_orch.add_subparsers(dest="orchestrate_command")
+
+    sp = orch_sub.add_parser("assess", help="Assess task complexity and orchestration need")
+    sp.add_argument("task", help="Task description")
+    sp.add_argument("--context-size", type=int, default=0, help="Estimated current context tokens")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_assess)
+
+    sp = orch_sub.add_parser("decompose", help="Decompose task into sub-tasks")
+    sp.add_argument("task", help="Task description")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_decompose)
+
+    sp = orch_sub.add_parser("spec", help="Generate complete sub-agent specifications")
+    sp.add_argument("task", help="Task description")
+    sp.add_argument("--context-size", type=int, default=0, help="Estimated current context tokens")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_spec)
+
+    sp = orch_sub.add_parser("spawn", help="Record sub-agent spawn")
+    sp.add_argument("--orchestration-id", help="Orchestration ID")
+    sp.add_argument("--sub-count", type=int, required=True, help="Number of sub-agents")
+    sp.add_argument("--profiles", help="Comma-separated profile names")
+    sp.add_argument("--task", required=True, help="Task summary")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_spawn)
+
+    sp = orch_sub.add_parser("complete", help="Record orchestration completion")
+    sp.add_argument("--orchestration-id", required=True, help="Orchestration ID")
+    sp.add_argument("--results", help="JSON array of sub-results")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_complete)
+
+    sp = orch_sub.add_parser("stats", help="Orchestrator statistics")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_stats)
+
+    sp = orch_sub.add_parser("reset", help="Reset circuit breaker")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_reset)
+
+    sp = orch_sub.add_parser("profiles", help="List tool profiles")
+    sp.set_defaults(func=cmd_orch_profiles)
 
     return parser
 

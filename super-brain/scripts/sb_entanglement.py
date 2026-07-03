@@ -28,12 +28,26 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sb_core import read_memories, read_graph, write_json, read_json, ensure_workspace, get_timestamp
+from sb_core import read_memories, read_graph, write_json, read_json, ensure_workspace, get_timestamp, read_meta
 from sb_search import (
     tokenize, ternary_hash, ternary_similarity, 
     tf_idf_cosine_similarity, WordNetwork, get_word_network,
     build_word_network_from_memories
 )
+
+# v3.1.0: Cold start gating (mirrors sb_reasoning thresholds)
+WARMUP_MEMORY_THRESHOLD = 15
+WARMUP_SESSION_THRESHOLD = 3
+
+
+def _is_entanglement_warmup(workspace=None):
+    """Check if entanglement should be gated due to cold start."""
+    memories = read_memories(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+    memory_count = len(active)
+    meta = read_meta(workspace)
+    session_count = meta.get("session_count", 0)
+    return memory_count < WARMUP_MEMORY_THRESHOLD or session_count < WARMUP_SESSION_THRESHOLD
 
 
 def mine_entanglement(concept, workspace=None, depth=2, min_strength=0.1):
@@ -47,6 +61,15 @@ def mine_entanglement(concept, workspace=None, depth=2, min_strength=0.1):
     
     Returns: dict with entangled concepts ranked by combined strength
     """
+    # v3.1.0: Cold start gating
+    if _is_entanglement_warmup(workspace):
+        return {
+            "mode": "warmup",
+            "concept": concept,
+            "entangled": [],
+            "warning": "Entanglement engine in warmup (need 15+ memories, 3+ sessions)"
+        }
+    
     results = {
         "concept": concept,
         "ternary_entanglements": [],

@@ -244,6 +244,246 @@ def update_meta(key, value, workspace=None):
     write_meta(meta, workspace)
 
 
+# ===================================================================
+# v3.1.0: Session Lifecycle Protocols (会话生命周期协议)
+# ===================================================================
+
+def session_start(workspace=None):
+    """
+    T1 — Session start protocol.
+    
+    1. Increment session counter
+    2. Check for crashed previous session
+    3. Retrieve relevant memories and project context
+    4. Output a session briefing
+    
+    Returns: dict with session briefing
+    """
+    meta = read_meta(workspace or "default")
+    previous_count = meta.get("session_count", 0)
+    meta["session_count"] = previous_count + 1
+    meta["last_session_start"] = get_timestamp()
+    write_meta(meta, workspace)
+    
+    # Check warmup status
+    from sb_memory import read_memories as _rmem
+    memories = _rmem(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+    active_count = len(active)
+    
+    # Detect depressed memories (about to expire)
+    from sb_pipeline import compute_decay_factor
+    from datetime import datetime as _dt, timezone as _tz
+    now = _dt.now(_tz.utc)
+    low_retention = []
+    for m in active:
+        cat = m.get("attributes", {}).get("content_category", "hybrid")
+        decay = compute_decay_factor(m, cat, now)
+        if decay < 0.15:
+            low_retention.append({
+                "id": m["id"],
+                "content": m.get("content", "")[:60],
+                "retention": round(decay, 4)
+            })
+    
+    # Check for unresolved items
+    unresolved = [m for m in active if m.get("attributes", {}).get("status") == "unresolved"]
+    
+    briefing = {
+        "protocol": "T1_session_start",
+        "session_number": meta["session_count"],
+        "warmup": active_count < 15 or meta["session_count"] < 3,
+        "active_memories": active_count,
+        "total_memories": len(memories),
+        "unresolved_items": len(unresolved),
+        "low_retention_items": len(low_retention),
+        "low_retention_detail": low_retention[:5],
+        "tip": _session_tip(meta["session_count"], active_count)
+    }
+    
+    return briefing
+
+
+def session_end(workspace=None):
+    """
+    T2 — Session end protocol (收尾安全网).
+    
+    1. Anti-pollution check on recent additions
+    2. Mark session as completed in meta
+    3. Generate session summary
+    
+    Returns: dict with session summary
+    """
+    meta = read_meta(workspace)
+    meta["last_session_end"] = get_timestamp()
+    meta["session_complete"] = True
+    
+    # Increment completed session count
+    completed = meta.get("completed_sessions", 0)
+    meta["completed_sessions"] = completed + 1
+    write_meta(meta, workspace)
+    
+    from sb_memory import read_memories as _rmem
+    memories = _rmem(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+    
+    # Count recent additions (last session)
+    auto_ingested = sum(1 for m in active if m.get("attributes", {}).get("auto_ingested"))
+    
+    return {
+        "protocol": "T2_session_end",
+        "session_number": meta["session_count"],
+        "completed_sessions": meta["completed_sessions"],
+        "active_memories": len(active),
+        "auto_ingested_ratio": f"{auto_ingested}/{len(active)}",
+        "tip": "Run 'SB pipeline cleanup' periodically to remove decayed memories."
+    }
+
+
+def periodic_health_check(workspace=None):
+    """
+    T3 — Periodic health check (7-dimensional scan).
+    
+    1. Total count check
+    2. Conflict detection
+    3. Orphan detection
+    4. Garbage collection (decayed items)
+    5. Pattern extraction quality
+    6. Index integrity
+    7. Backpressure from legacy items
+    
+    Returns: dict with health report
+    """
+    from sb_memory import read_memories as _rmem
+    from sb_pipeline import compute_decay_factor, cleanup_memories
+    from datetime import datetime as _dt, timezone as _tz
+    
+    memories = _rmem(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+    now = _dt.now(_tz.utc)
+    
+    # 1. Total count
+    total = len(memories)
+    active_count = len(active)
+    deprecated_count = sum(1 for m in memories if m.get("status") == "deprecated")
+    superseded_count = sum(1 for m in memories if m.get("status") == "superseded")
+    
+    # 2. Conflict detection - check for temporal overlaps
+    conflicts = 0
+    from collections import defaultdict
+    by_entity = defaultdict(list)
+    for m in active:
+        entity = (m.get("entity", "general").lower(), m.get("type", "fact"))
+        by_entity[entity].append(m)
+    for entity_group in by_entity.values():
+        if len(entity_group) > 1:
+            for i in range(len(entity_group)):
+                for j in range(i + 1, len(entity_group)):
+                    vf1 = entity_group[i].get("valid_from")
+                    vf2 = entity_group[j].get("valid_from")
+                    vu1 = entity_group[i].get("valid_until")
+                    vu2 = entity_group[j].get("valid_until")
+                    if vf1 and vf2 and vu1 and vu2:
+                        if vf1 <= vu2 and vu1 >= vf2:
+                            conflicts += 1
+    
+    # 3. Orphan detection - memories with no graph edges
+    from sb_graph import read_graph as _rg
+    graph = _rg(workspace)
+    all_graph_ids = set()
+    nodes = graph.get("nodes", {})
+    if isinstance(nodes, dict):
+        for n in nodes.values():
+            if isinstance(n, dict):
+                all_graph_ids.add(n.get("id", ""))
+    elif isinstance(nodes, list):
+        for n in nodes:
+            if isinstance(n, dict):
+                all_graph_ids.add(n.get("id", ""))
+    orphan_count = sum(1 for m in active if m["id"] not in all_graph_ids)
+    
+    # 4. GC status
+    gc_candidates = 0
+    for m in active:
+        cat = m.get("attributes", {}).get("content_category", "hybrid")
+        decay = compute_decay_factor(m, cat, now)
+        if decay < 0.15:
+            gc_candidates += 1
+    
+    # 5. Pattern extraction quality
+    from sb_search import build_word_network_from_memories
+    wn = build_word_network_from_memories(active)
+    pattern_count = len(wn.node_count) if hasattr(wn, 'node_count') else (len(wn._nodes) if hasattr(wn, '_nodes') else 0)
+    
+    # 6. Index integrity - check if word network is built
+    index_intact = pattern_count > 0
+    
+    # 7. Legacy backpressure
+    legacy = [m for m in memories if m.get("status") not in ("active", "deprecated", "superseded")]
+    
+    report = {
+        "protocol": "T3_health_check",
+        "timestamp": now.isoformat(),
+        "scan_dimensions": 7,
+        "total_items": total,
+        "active": active_count,
+        "deprecated": deprecated_count,
+        "superseded": superseded_count,
+        "conflicts": conflicts,
+        "orphans": orphan_count,
+        "gc_candidates": gc_candidates,
+        "pattern_count": pattern_count,
+        "index_intact": index_intact,
+        "legacy_backpressure": len(legacy),
+        "health_score": _compute_health_score(
+            active_count, conflicts, orphan_count, gc_candidates, 
+            deprecated_count, int(index_intact), len(legacy)
+        ),
+        "recommendation": _health_recommendation(
+            gc_candidates, deprecated_count, conflicts, orphan_count
+        )
+    }
+    
+    return report
+
+
+def _session_tip(session_n, mem_count):
+    """Generate contextual tip for session start."""
+    if session_n <= 1:
+        return "Welcome! Super Brain is in cold start. Share information freely — it will learn from you."
+    if mem_count < 15:
+        return f"Warmup mode: {mem_count}/15 memories. Perception and storage active; reasoning will unlock soon."
+    return f"Active mode: {mem_count} memories, {session_n} sessions. All cognitive modules online."
+
+
+def _compute_health_score(active, conflicts, orphans, gc_candidates, deprecated, index_intact, legacy):
+    """Compute a 0-100 health score."""
+    score = 100
+    score -= min(30, conflicts * 5)          # -5 per conflict, max -30
+    score -= min(20, orphans * 3)            # -3 per orphan, max -20
+    score -= min(20, gc_candidates * 2)      # -2 per GC candidate, max -20
+    score -= min(10, deprecated * 1)         # -1 per deprecated, max -10
+    score -= 15 if not index_intact else 0
+    score -= min(5, legacy * 2)              # -2 per legacy, max -5
+    return max(0, score)
+
+
+def _health_recommendation(gc_count, deprecated_count, conflicts, orphans):
+    """Generate health recommendations."""
+    recs = []
+    if gc_count > 10:
+        recs.append(f"Run 'SB pipeline cleanup' to remove {gc_count} decayed items")
+    if deprecated_count > 5:
+        recs.append(f"{deprecated_count} deprecated items pending hard delete")
+    if conflicts > 0:
+        recs.append(f"{conflicts} temporal conflicts detected — review manually")
+    if orphans > 3:
+        recs.append(f"{orphans} orphan memories without graph edges")
+    if not recs:
+        recs.append("All systems nominal — no action needed")
+    return recs
+
+
 def get_health_dir():
     """Get health reports directory."""
     config = load_config()

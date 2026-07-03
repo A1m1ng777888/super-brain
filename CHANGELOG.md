@@ -1,5 +1,77 @@
 # Changelog
 
+## [3.2.2] — 2026-07-02
+
+### 升级 — 前置评估 Ambient
+
+- **SOUL.md**：新增「前置编配评估」四问判断逻辑（上下文量/并行度/能力差异/隐含范围），始终在线，不依赖 skill 加载
+- **SKILL.md**：规则 #5 标注已提升至 SOUL.md，前置编配评估协议部分追加引用说明
+- **架构**：前置评估从 skill-gated → identity-gated，Agent 收到任何任务时自主判断，需要编排时才加载 skill
+
+## [3.2.1] — 2026-07-02
+
+### 升级 — 前置编配评估协议
+
+- **隐含范围识别**：`_assess_independence()` 加入多画像自动加分、范围关键词、Token 量级加分
+- **域感知 Token 预估**：`_estimate_task_tokens()` 域感知 floor（"完整网站"→最低 15000 tokens）
+- **隐含子任务发现**：`_discover_implicit_subtasks()` 自动将单句大任务展开为多个并行子任务
+- **画像检测补全**：前端/后端/数据库/部署 → code 画像，网站/网页 → design 画像
+- **SKILL.md 强制规则 #5**：收到非简单任务时先跑 `orchestrate assess`
+
+## [3.2.0] — 2026-07-02
+
+### 新增 — 子 Agent 编排器
+
+- **sb_orchestrator.py**（~650 行）：子 Agent 编排引擎
+- **4 维度复杂度评估**：context_isolation / task_independence / tool_divergence / token_risk
+- **反编配门控**：TRIVIAL_PATTERNS 硬拒、SEQUENTIAL_PATTERNS 硬挡（≥2 匹配）、CIRCUIT_BREAKER 熔断（3 次级联）
+- **任务分解引擎**：四要素（objective + output_format + tools + boundary）+ 独立性校验
+- **6 套工具画像**：research / code / design / data / docs / general
+- **预算熔断**：50000 token 上限 + 3 次失败触发会话级熔断
+- **生命周期追踪**：spawn/complete/fail 记录 + 画像使用频率统计
+- **CLI**：orchestrate 命令组（assess/decompose/spec/spawn/complete/stats/reset/profiles）
+- **测试**：76 项全通过（61 + 3 CLI + 12 orchestrator）
+
+## [3.1.0] — 2026-07-02
+
+### 新增 — 五大模块升级
+
+#### 反污染规则 (`sb_memory.py` — P0)
+
+- confidence < 0.7 的决策不入库
+- 未解决错误不入库
+- SimHash ≥ 0.92 时递增计数器不新建记录
+- 死胡同探索模式不入库
+
+#### Obsidian 双向同步 (`sb_obsidian.py` — P1，全新 ~330 行)
+
+- JSON → .md + [[wikilinks]] 导出至 Obsidian vault
+- YAML frontmatter（tags/type/entity/confidence/status）
+- 反向同步（.md 编辑回写 JSON）
+- 自动链接已有 vault 笔记
+
+#### 冷启动门控 (`sb_reasoning.py` / `sb_entanglement.py` — P1)
+
+- memory < 15 AND session < 3 → 仅感知+存储，关闭推理引擎和纠缠场
+- 达标后自动切换为 active 模式
+
+#### 退场生命周期 (`sb_pipeline.py` — P2)
+
+- 两阶段清理：标记弃用 → 硬删除，自动备份
+- 新增硬删除线和弃用缓冲期
+
+#### 会话生命周期协议 (`sb_core.py` — P2)
+
+- T1 启动：搜索 + 简报 + session 计数
+- T2 收尾：反污染 + 入库 + 图谱更新
+- T3 定期：7 维健康扫描
+
+### 测试
+
+- 61 项全通过
+
+---
+
 ## [3.0.1] — 2026-07-02
 
 ### 修复 — 被动触发

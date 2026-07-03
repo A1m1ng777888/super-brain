@@ -36,19 +36,25 @@ CATEGORY_HYBRID = "hybrid"  # Contains both definition and chitchat elements
 # Decay configuration (in days)
 DECAY_CONFIG = {
     CATEGORY_DEFINITION: {
-        "half_life_days": 365,      # Definition: ~1 year half-life
+        "half_life_days": 365,
         "min_confidence": 0.6,
-        "auto_archive_days": 730,   # Archive after 2 years if not accessed
+        "auto_archive_days": 730,
+        "hard_delete_retention": 0.05,    # v3.1.0: retention below this → mark deprecated
+        "deprecated_grace_days": 90,       # v3.1.0: days after deprecation before hard delete
     },
     CATEGORY_CHITCHAT: {
-        "half_life_days": 7,        # Chitchat: ~1 week half-life
+        "half_life_days": 7,
         "min_confidence": 0.3,
-        "auto_archive_days": 30,    # Archive after 1 month if not accessed
+        "auto_archive_days": 30,
+        "hard_delete_retention": 0.10,     # v3.1.0
+        "deprecated_grace_days": 0,         # v3.1.0: chitchat → delete immediately (no grace)
     },
     CATEGORY_HYBRID: {
-        "half_life_days": 90,       # Hybrid: ~3 months half-life
+        "half_life_days": 90,
         "min_confidence": 0.4,
-        "auto_archive_days": 180,   # Archive after 6 months if not accessed
+        "auto_archive_days": 180,
+        "hard_delete_retention": 0.08,     # v3.1.0
+        "deprecated_grace_days": 60,        # v3.1.0
     }
 }
 
@@ -310,3 +316,105 @@ def get_pipeline_stats(workspace=None):
         "avg_decay_factor": round(avg_decay, 3),
         "decay_config": {k: {"half_life_days": v["half_life_days"], "auto_archive_days": v["auto_archive_days"]} for k, v in DECAY_CONFIG.items()}
     }
+
+
+# ===================================================================
+# v3.1.0: Hard Delete Lifecycle (退场生命周期)
+# ===================================================================
+
+def cleanup_memories(workspace=None, dry_run=False, force=False):
+    """
+    v3.1.0: Clean up decayed memories with a staged lifecycle.
+    
+    Stage 1 (deprecate): retention < hard_delete_retention → mark "deprecated"
+    Stage 2 (delete): deprecated for > deprecated_grace_days → hard delete
+    
+    Auto-backs up memories before any destructive action.
+    
+    Args:
+        workspace: workspace name
+        dry_run: if True, only report what would be deleted
+        force: if True, skip confirmation and auto-backup
+    
+    Returns:
+        dict with cleanup report
+    """
+    from sb_memory import read_memories, write_memories
+    import shutil
+    
+    memories = read_memories(workspace)
+    ws_dir = ensure_workspace(workspace)
+    now = datetime.now(timezone.utc)
+    
+    # Auto-backup before cleanup (unless dry_run)
+    if not dry_run and memories:
+        backup_path = os.path.join(ws_dir, f"memories_backup_{now.strftime('%Y%m%d_%H%M%S')}.json")
+        try:
+            write_json(backup_path, memories)
+        except Exception:
+            pass  # Non-critical, proceed
+    
+    report = {
+        "deprecated": [],
+        "deleted": [],
+        "skipped": 0,
+        "total": len(memories),
+        "timestamp": now.isoformat(),
+        "dry_run": dry_run
+    }
+    
+    active = [m for m in memories]
+    for m in active:
+        cat = m.get("attributes", {}).get("content_category")
+        if cat is None:
+            result = classify_content(m.get("content", ""))
+            cat = result["category"]
+        
+        config = DECAY_CONFIG.get(cat, DECAY_CONFIG[CATEGORY_HYBRID])
+        retention = compute_decay_factor(m, cat, now)
+        status = m.get("status", "active")
+        
+        # Stage 1: Mark as deprecated if retention is critically low
+        if retention <= config.get("hard_delete_retention", 0.05) and status == "active":
+            if not dry_run:
+                m["status"] = "deprecated"
+                m["deprecated_at"] = now.isoformat()
+                m["deprecated_retention"] = round(retention, 4)
+            report["deprecated"].append({
+                "id": m["id"],
+                "content": m.get("content", "")[:60],
+                "category": cat,
+                "retention": round(retention, 4)
+            })
+            continue
+        
+        # Stage 2: Hard delete if deprecated past grace period
+        if status == "deprecated" and "deprecated_at" in m:
+            try:
+                dep_dt = datetime.fromisoformat(m["deprecated_at"].replace("Z", "+00:00"))
+                if dep_dt.tzinfo is None:
+                    dep_dt = dep_dt.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                dep_dt = now
+            
+            grace = config.get("deprecated_grace_days", 90)
+            days_deprecated = (now - dep_dt).days
+            
+            if grace == 0 or days_deprecated >= grace:
+                report["deleted"].append({
+                    "id": m["id"],
+                    "content": m.get("content", "")[:60],
+                    "category": cat,
+                    "retention": round(retention, 4),
+                    "days_deprecated": days_deprecated
+                })
+                if not dry_run:
+                    memories.remove(m)
+    
+    if not dry_run:
+        write_memories(memories, workspace)
+    
+    report["deprecated_count"] = len(report["deprecated"])
+    report["deleted_count"] = len(report["deleted"])
+    
+    return report

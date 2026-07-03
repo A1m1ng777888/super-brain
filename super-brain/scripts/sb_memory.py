@@ -518,11 +518,38 @@ def auto_store(text, source_session=None, workspace=None):
     points_to_store = key_points if key_points else [{"sentence": text[:300], "type": "contextual"}]
     
     for point in points_to_store:
+        # v3.1.0: Anti-pollution check before storing
+        inferred_type = _infer_type(point.get("type", "contextual"), classification["category"])
+        stored_confidence = min(0.95, perception["value"] + 0.1)
+        
+        pollution = anti_pollution_check(
+            content=point["sentence"],
+            mem_type=inferred_type,
+            confidence=stored_confidence,
+            workspace=workspace
+        )
+        
+        if pollution["action"] == "skip":
+            continue  # Don't store pollution
+        
+        if pollution["action"] == "increment":
+            increment_memory_counter(pollution["increment_target"], workspace)
+            stored.append({
+                "id": pollution["increment_target"],
+                "content": point["sentence"][:80],
+                "type": inferred_type,
+                "category": classification["category"],
+                "action": "incremented",
+                "similarity": pollution.get("similarity", 0)
+            })
+            continue
+        
+        # Clean: store normally
         memory = add_memory(
             content=point["sentence"],
-            mem_type=_infer_type(point.get("type", "contextual"), classification["category"]),
+            mem_type=inferred_type,
             entity=_guess_entity(point["sentence"]),
-            confidence=min(0.95, perception["value"] + 0.1),
+            confidence=stored_confidence,
             source=source_session or "auto_store",
             attributes={
                 "content_category": classification["category"],
@@ -536,7 +563,8 @@ def auto_store(text, source_session=None, workspace=None):
             "id": memory["id"],
             "content": point["sentence"][:80],
             "type": memory["type"],
-            "category": classification["category"]
+            "category": classification["category"],
+            "action": "stored"
         })
     
     return {
@@ -557,6 +585,132 @@ def _infer_type(point_type, category):
         "contextual": "context"
     }
     return type_map.get(point_type, "context")
+
+
+# ===================================================================
+# v3.1.0: Anti-Pollution Rules (反污染规则)
+# ===================================================================
+
+# Patterns that indicate unresolved errors (should NOT be stored)
+UNRESOLVED_ERROR_PATTERNS = [
+    r'(?:报错|出错|失败|异常|错误|bug|error|fail|crash)',
+    r'(?:不知道怎么|搞不定|没解决|未解决|不行|不行了)',
+    r'(?:试了.*不行|试过.*没用|怎么都.*不了)',
+    r'(?:还在找|还在查|还没|尚未|仍未)',
+]
+
+# Patterns that indicate a RESOLVED error (can be stored)
+RESOLVED_ERROR_PATTERNS = [
+    r'(?:解决了|修好了|搞定|修复了|弄好了|成功了)',
+    r'(?:原来是|root cause|根本原因)',
+    r'(?:解决方法|解决方案|fix|resolve|workaround)',
+]
+
+# Patterns that indicate dead-end exploration (transient, should skip)
+DEAD_END_PATTERNS = [
+    r'(?:试一下|试试看|先看看|看看能不能)',
+    r'(?:或许可以|可能可以|大概可以|不确定)',
+    r'(?:临时|暂定|先这样|凑合)',
+]
+
+
+def anti_pollution_check(content, mem_type=None, confidence=0.0, workspace=None):
+    """
+    v3.1.0: Check if a memory should be stored or is pollution.
+    
+    Rules:
+    1. Decision-type + confidence < 0.7 → SKIP (likely dead-end exploration)
+    2. Unresolved error → SKIP (only store resolved errors)
+    3. Near-duplicate (SimHash distance < threshold) → INCREMENT counter
+    4. Dead-end pattern → SKIP
+    
+    Returns:
+        dict with:
+        - action: "store" | "skip" | "increment"
+        - reason: str
+        - increment_target: memory id (if action == "increment")
+    """
+    # Rule 1: Low-confidence decisions
+    if mem_type == "decision" and confidence < 0.7:
+        return {
+            "action": "skip",
+            "reason": f"Low-confidence decision (confidence={confidence:.2f} < 0.7), likely dead-end exploration"
+        }
+    
+    # Rule 2: Unresolved errors
+    content_lower = content.lower()
+    has_error = any(re.search(p, content_lower) for p in UNRESOLVED_ERROR_PATTERNS)
+    has_resolution = any(re.search(p, content_lower) for p in RESOLVED_ERROR_PATTERNS)
+    if has_error and not has_resolution:
+        return {
+            "action": "skip",
+            "reason": "Unresolved error detected, only resolved errors should be stored"
+        }
+    
+    # Rule 3: Dead-end exploration patterns
+    has_dead_end = any(re.search(p, content_lower) for p in DEAD_END_PATTERNS)
+    if has_dead_end and confidence < 0.75:
+        return {
+            "action": "skip",
+            "reason": "Dead-end exploration pattern detected with low confidence"
+        }
+    
+    # Rule 4: Near-duplicate detection (SimHash-based)
+    try:
+        content_sh = simhash(content)
+        memories = read_memories(workspace)
+        active = [m for m in memories if m.get("status") == "active"]
+        best_match = None
+        best_sim = 0.0
+        for m in active:
+            if m.get("simhash"):
+                similarity = simhash_similarity(content_sh, m["simhash"])
+                if similarity > best_sim:
+                    best_sim = similarity
+                    best_match = m
+        
+        # Very high similarity → increment counter instead of creating new
+        if best_sim >= 0.92 and best_match:
+            return {
+                "action": "increment",
+                "reason": f"Near-duplicate detected (SimHash similarity={best_sim:.3f}), incrementing counter",
+                "increment_target": best_match["id"],
+                "similarity": round(best_sim, 3)
+            }
+    except Exception:
+        pass  # If dedup fails, proceed with store
+    
+    return {"action": "store", "reason": "Passed all anti-pollution checks"}
+
+
+def simhash_similarity(h1, h2):
+    """Calculate SimHash similarity (0.0-1.0) via Hamming distance."""
+    if h1 == 0 or h2 == 0:
+        return 0.0
+    xor = h1 ^ h2
+    distance = bin(xor).count('1')
+    return 1.0 - (distance / 64.0)
+
+
+def increment_memory_counter(mem_id, workspace=None):
+    """
+    Increment access/repetition counter on an existing memory.
+    Instead of creating a duplicate, update the existing memory's
+    access_count and last_accessed timestamp.
+    """
+    memories = read_memories(workspace)
+    for m in memories:
+        if m["id"] == mem_id:
+            m["access_count"] = m.get("access_count", 0) + 1
+            m["last_accessed"] = get_timestamp()
+            # v3.1.0: record observation sessions
+            sessions = m.get("attributes", {}).get("sessions_observed", 1)
+            if "attributes" not in m:
+                m["attributes"] = {}
+            m["attributes"]["sessions_observed"] = sessions + 1
+            write_memories(memories, workspace)
+            return {"incremented": True, "memory_id": mem_id, "new_count": m["access_count"]}
+    return {"incremented": False, "reason": "Memory not found"}
 
 
 def _guess_entity(text):

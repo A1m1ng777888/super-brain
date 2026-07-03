@@ -233,6 +233,16 @@ print("\n--- 8. Entanglement (纠缠场) ---")
 add_memory(content="超脑使用三进制哈希进行语义搜索", mem_type="fact", entity="超脑", confidence=0.9)
 add_memory(content="三进制哈希比二进制SimHash有更强的区分能力", mem_type="fact", entity="超脑", confidence=0.85)
 add_memory(content="语义搜索通过TF-IDF和关键词匹配实现", mem_type="fact", entity="超脑", confidence=0.8)
+# v3.1.0: Add enough memories to pass cold start gating (need 15+)
+for i in range(12):
+    add_memory(content=f"测试记忆内容用于填充 #{i+1}", mem_type="fact",
+              entity=f"测试实体{i%3}", confidence=0.8)
+
+# Bump session count to pass warmup
+from sb_core import read_meta, write_meta
+meta = read_meta()
+meta["session_count"] = meta.get("session_count", 0) + 3
+write_meta(meta)
 
 ent_result = mine_entanglement("超脑", min_strength=0.05)
 test("mine_entanglement returns dict", "combined" in ent_result, "should have combined results")
@@ -317,6 +327,76 @@ test("CLI has reason command", "reason" in test_actions)
 test("CLI has entangle command", "entangle" in test_actions)
 test("CLI has context-mem command", "context-mem" in test_actions)
 test("CLI has longterm command", "longterm" in test_actions)
+
+# v3.1.0 CLI tests
+test("CLI has session command", "session" in test_actions)
+test("CLI has obsidian command", "obsidian" in test_actions)
+
+# v3.2.0 CLI tests
+test("CLI has orchestrate command", "orchestrate" in test_actions, f"available: {test_actions}")
+
+# === 13. Orchestrator Tests (v3.2.0) ===
+print("\n--- 13. Orchestrator (子Agent编排器) ---")
+from sb_orchestrator import (
+    should_orchestrate, decompose_task, generate_sub_agent_specs,
+    validate_isolation, select_minimal_tools, _detect_needed_profiles,
+    TOOL_PROFILES, ORCHESTRATE_THRESHOLD, get_orchestration_stats
+)
+
+# Assessment - trivial rejection
+decision = should_orchestrate("帮我看一下今天几号")
+test("O1: trivial task rejected", not decision["should_spawn"], decision["reason"])
+
+# Assessment - sequential gate (needs ≥2 sequential patterns)
+decision = should_orchestrate("先安装依赖，然后再启动服务器，最后再运行测试")
+test("O2: sequential task gated", decision["gate"] in ("sequential", "complexity"), decision["gate"])
+
+# Assessment - complex parallel passes
+decision = should_orchestrate(
+    "帮我同时做：\n1. 搜索最新的 AI Agent 论文\n2. 写Python后端接口代码\n"
+    "3. 设计管理后台UI界面\n4. 生成项目分析报告",
+    current_context_size=70000
+)
+test("O3: complex parallel passes orchestrator gate", decision["should_spawn"], decision["assessment"]["reasoning"])
+
+# Decomposition
+decomp = decompose_task(
+    "1. 搜索AI搜索技术 2. 写数据分析脚本 3. 设计看板界面 4. 生成PPT报告"
+)
+test("O4: decomposition produces subtasks", decomp["count"] >= 2, f"Got {decomp['count']}")
+st = decomp["sub_tasks"][0]
+test("O5: subtask has 4 required fields", all(k in st for k in ["objective", "output_format", "tools", "boundary"]))
+
+# Independence validation
+similar = [{"objective": "搜索React 19新特性"}, {"objective": "搜索React 19更新"}]
+issues = validate_isolation(similar)
+test("O6: detects overlapping subtasks", len(issues) > 0)
+
+independent = [{"objective": "设计UI"}, {"objective": "分析数据"}, {"objective": "编写脚本"}]
+issues = validate_isolation(independent)
+test("O7: independent subtasks pass", len(issues) == 0)
+
+# Profile detection
+profiles = _detect_needed_profiles("帮我写Python代码并设计UI界面")
+test("O8: detects code+design profiles", "code" in profiles and "design" in profiles, str(profiles))
+
+# Tool selection
+tools = select_minimal_tools("research")
+test("O9: research profile has tools", len(tools["tools"]) > 0)
+
+# Full spec generation
+spec = generate_sub_agent_specs(
+    "帮我同时做：\n1. 搜索最新AI论文\n2. 写Python代码\n3. 设计UI界面",
+    current_context_size=60000
+)
+test("O10: full spec generates correctly", "should_orchestrate" in spec)
+
+# Stats
+stats = get_orchestration_stats()
+test("O11: orchestrator stats available", "stats" in stats and "version" in stats)
+
+# Profile registry
+test("O12: TOOL_PROFILES has 5+ profiles", len(TOOL_PROFILES) >= 5, str(list(TOOL_PROFILES.keys())))
 
 # === Summary ===
 print("\n" + "=" * 60)
