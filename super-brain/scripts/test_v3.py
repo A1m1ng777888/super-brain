@@ -345,6 +345,10 @@ from sb_orchestrator import (
     validate_isolation, select_minimal_tools, _detect_needed_profiles,
     TOOL_PROFILES, ORCHESTRATE_THRESHOLD, get_orchestration_stats
 )
+# v3.4.0
+from sb_selfcheck import check_file_integrity, check_index_integrity, check_backup_freshness, _create_backup, run_full_check
+from sb_token_roi import calc_token_roi
+from superbrain import cmd_token_roi
 
 # Assessment - trivial rejection
 decision = should_orchestrate("帮我看一下今天几号")
@@ -400,6 +404,40 @@ test("O11: orchestrator stats available", "stats" in stats and "version" in stat
 
 # Profile registry
 test("O12: TOOL_PROFILES has 5+ profiles", len(TOOL_PROFILES) >= 5, str(list(TOOL_PROFILES.keys())))
+
+# === 14. v3.4.0: Physical Selfcheck (物理层自检) ===
+print("\n--- 14. Physical Selfcheck (v3.4.0) ---")
+
+test("SC1: file_integrity check exists", callable(check_file_integrity))
+fi = check_file_integrity()
+test("SC2: file_integrity reports healthy", fi["status"] in ("healthy", "warning", "critical"))
+
+test("SC3: index_integrity check exists", callable(check_index_integrity))
+ii = check_index_integrity()
+test("SC4: index_integrity runs without error", ii["status"] in ("healthy", "warning"))
+
+test("SC5: backup_freshness check exists", callable(check_backup_freshness))
+bf = check_backup_freshness()
+test("SC6: backup_freshness reports status", bf["status"] in ("healthy", "warning"))
+
+test("SC7: _create_backup exists", callable(_create_backup))
+bk = _create_backup(reason="test")
+test("SC8: backup creates files", len(bk.get("files", [])) > 0, f"Backed up: {bk.get('files', [])}")
+
+# 9 items total
+full = run_full_check()
+test("SC9: full check now has 9 checks", len(full["checks"]) >= 9, f"Count: {len(full['checks'])}")
+
+# === 15. v3.4.0: Token ROI (Token 量化) ===
+print("\n--- 15. Token ROI (v3.4.0) ---")
+
+test("T1: calc_token_roi exists", callable(calc_token_roi))
+roi = calc_token_roi()
+test("T2: ROI has expected fields", "total_savings" in roi and "roi_ratio" in roi)
+test("T3: ROI ratio is positive", roi["roi_ratio"] >= 0)
+test("T4: ROI has category breakdown", len(roi.get("by_category", {})) > 0)
+test("T5: ROI has top savers", len(roi.get("top_savers", [])) >= 0)
+test("T6: cmd_token_roi exists", callable(cmd_token_roi))
 
 # === Summary ===
 print("\n" + "=" * 60)

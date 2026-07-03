@@ -406,7 +406,18 @@ def cmd_stats(args):
     print(f"  Nodes: {graph_stats['total_nodes']} | Edges: {graph_stats['total_edges']}")
     print(f"  Orphan Nodes: {graph_stats['orphan_nodes']}")
     print(f"  Node Types: {json.dumps(graph_stats['node_types'], ensure_ascii=False)}")
-    print(f"  Edge Types: {json.dumps(graph_stats['edge_types'], ensure_ascii=False)}")
+
+
+def cmd_token_roi(args):
+    """v3.4.0: Show Token ROI quantification."""
+    from sb_token_roi import get_token_roi_summary, calc_token_roi, get_roi_quickline
+    if args.quickline:
+        print(get_roi_quickline(recent_days=args.days))
+    elif args.json:
+        data = calc_token_roi(recent_days=args.days)
+        print_json(data)
+    else:
+        print(get_token_roi_summary(recent_days=args.days))
 
 
 def cmd_version(args):
@@ -1110,6 +1121,14 @@ def build_parser():
     # stats
     sp = subparsers.add_parser("stats", help="Show overall statistics")
     sp.set_defaults(func=cmd_stats)
+
+    # v3.4.0: token-roi
+    sp_roi = subparsers.add_parser("token-roi", help="Quantify token savings ROI")
+    sp_roi.add_argument("--summary", action="store_true", default=True, help="Show human-readable summary")
+    sp_roi.add_argument("--json", action="store_true", help="Output full JSON data")
+    sp_roi.add_argument("--days", type=int, default=None, help="Only count recent N days")
+    sp_roi.add_argument("--quickline", action="store_true", help="One-line summary for dialog injection")
+    sp_roi.set_defaults(func=cmd_token_roi)
 
     # version
     sp = subparsers.add_parser("version", help="Show version information")

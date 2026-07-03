@@ -1,26 +1,212 @@
 #!/usr/bin/env python3
 """
-SuperBrain Self-Check System
-Periodic diagnostics: consistency, timeliness, temporal_validity (v2.1.0),
-completeness, orphans, duplicates.
+SuperBrain Self-Check System v3.4.0
+====================================
+v3.4.0 升级：物理层自检（文件完整性+索引可重建性+备份时效）+ 修复前自动备份
+v2.1.0-base: consistency, timeliness, temporal_validity, completeness, orphans, duplicates.
 Generates health reports and can auto-fix safe issues.
 
 Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
 Author: A1m1ng777888
 """
 
+import json
+import shutil
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from datetime import datetime, timezone as dt_tz
 from sb_core import (
     get_timestamp, read_memories, write_memories,
     read_graph, write_graph, read_meta, update_meta,
-    get_health_dir, write_json, read_json, print_json, load_config
+    get_health_dir, write_json, read_json, print_json, load_config,
+    get_workspace_dir, ensure_dir
 )
 from sb_search import find_duplicates, simhash, simhash_similarity
 from sb_memory import find_issues, get_stats as get_mem_stats
 from sb_graph import get_stats as get_graph_stats
+
+
+# ===== v3.4.0: 自动备份 =====
+
+def _create_backup(workspace=None, reason="selfcheck_fix"):
+    """修复前自动备份当前工作区数据"""
+    ws_dir = get_workspace_dir(workspace)
+    backup_dir = os.path.join(ws_dir, "backups")
+    ensure_dir(backup_dir)
+
+    timestamp = datetime.now(dt_tz.utc).strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(backup_dir, f"backup_{reason}_{timestamp}")
+    ensure_dir(backup_path)
+
+    files_to_backup = ["memories.json", "graph.json", "meta.json", "index.json"]
+    backed_up = []
+    for fname in files_to_backup:
+        src = os.path.join(ws_dir, fname)
+        if os.path.exists(src):
+            dst = os.path.join(backup_path, fname)
+            shutil.copy2(src, dst)
+            backed_up.append(fname)
+
+    # Clean old backups (keep last 5)
+    existing = sorted(
+        [d for d in os.listdir(backup_dir) if d.startswith("backup_")],
+        reverse=True
+    )
+    for old in existing[5:]:
+        old_path = os.path.join(backup_dir, old)
+        if os.path.isdir(old_path):
+            shutil.rmtree(old_path, ignore_errors=True)
+
+    return {
+        "backup_path": backup_path,
+        "files": backed_up,
+        "reason": reason
+    }
+
+
+# ===== v3.4.0: 物理层检查 =====
+
+def check_file_integrity(workspace=None):
+    """
+    v3.4.0: Check physical file integrity.
+    Verifies memory/graph files exist and contain valid JSON.
+    """
+    ws_dir = get_workspace_dir(workspace)
+    required_files = {
+        "memories.json": "记忆数据",
+        "graph.json": "知识图谱",
+        "meta.json": "元数据"
+    }
+    issues = []
+
+    for fname, label in required_files.items():
+        fpath = os.path.join(ws_dir, fname)
+        if not os.path.exists(fpath):
+            issues.append({"file": fname, "label": label, "problem": "文件不存在"})
+            continue
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                json.load(f)
+        except json.JSONDecodeError as e:
+            issues.append({"file": fname, "label": label, "problem": f"JSON格式损坏: {e}"})
+        except Exception as e:
+            issues.append({"file": fname, "label": label, "problem": f"读取失败: {e}"})
+
+    # Also check index file if exists
+    idx_path = os.path.join(ws_dir, "index.json")
+    if os.path.exists(idx_path):
+        try:
+            with open(idx_path, "r", encoding="utf-8") as f:
+                idx_data = json.load(f)
+            # Verify index has expected structure
+            if "ternary_buckets" not in idx_data and "word_network" not in idx_data:
+                issues.append({"file": "index.json", "label": "检索索引", "problem": "索引结构不完整，可能需重建"})
+        except:
+            issues.append({"file": "index.json", "label": "检索索引", "problem": "索引文件损坏，需重建"})
+
+    return {
+        "check": "file_integrity",
+        "status": "critical" if issues else "healthy",
+        "issues_found": len(issues),
+        "details": issues,
+        "recommendation": (
+            "部分数据文件缺失或损坏，请运行 'python superbrain.py init --fix' 修复，"
+            "或从备份恢复。修复前会自动备份当前状态。"
+        ) if issues else "所有数据文件完整且格式正确。"
+    }
+
+
+def check_index_integrity(workspace=None):
+    """
+    v3.4.0: Check search index rebuildability.
+    Verifies that ternary hash index and inverted index can be rebuilt from memory data.
+    """
+    from sb_search import ternary_hash, build_word_network_from_memories, get_word_network
+    memories = read_memories(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+
+    issues = []
+    rebuild_estimate = 0
+
+    for m in active:
+        content = m.get("content", "")
+        if content:
+            try:
+                h = ternary_hash(content)
+                rebuild_estimate += 1
+            except Exception:
+                issues.append({"id": m["id"], "problem": f"无法计算三进制哈希: {content[:40]}..."})
+
+    # Check word network
+    wn = get_word_network(workspace)
+    wn_tokens = len(wn.tokens) if wn and hasattr(wn, 'tokens') else 0
+
+    return {
+        "check": "index_integrity",
+        "status": "warning" if issues else "healthy",
+        "issues_found": len(issues),
+        "details": {
+            "rebuildable_count": rebuild_estimate,
+            "total_active": len(active),
+            "word_network_tokens": wn_tokens,
+            "failed_items": issues[:10]
+        },
+        "recommendation": (
+            f"索引可重建：{rebuild_estimate}/{len(active)} 条。"
+            f"运行 'python superbrain.py longterm index' 可重建索引。"
+        )
+    }
+
+
+def check_backup_freshness(workspace=None):
+    """
+    v3.4.0: Check backup freshness.
+    Warns if the last backup is older than 30 days or if no backups exist.
+    """
+    ws_dir = get_workspace_dir(workspace)
+    backup_dir = os.path.join(ws_dir, "backups")
+    ensure_dir(backup_dir)
+
+    backups = sorted(
+        [d for d in os.listdir(backup_dir) if d.startswith("backup_") and os.path.isdir(os.path.join(backup_dir, d))],
+        key=lambda x: x,
+        reverse=True
+    )
+
+    if not backups:
+        return {
+            "check": "backup_freshness",
+            "status": "warning",
+            "issues_found": 1,
+            "details": {"last_backup": None, "total_backups": 0},
+            "recommendation": "尚无任何数据备份。建议定期备份：'python superbrain.py backup create'。"
+        }
+
+    # Get latest backup age
+    latest = os.path.join(backup_dir, backups[0])
+    latest_mtime = os.path.getmtime(latest)
+    latest_time = datetime.fromtimestamp(latest_mtime, dt_tz.utc)
+    age_days = (datetime.now(dt_tz.utc) - latest_time).days
+
+    # Count files in latest backup
+    backup_files = len([f for f in os.listdir(latest) if os.path.isfile(os.path.join(latest, f))])
+
+    return {
+        "check": "backup_freshness",
+        "status": "warning" if age_days > 30 else "healthy",
+        "issues_found": 1 if age_days > 30 else 0,
+        "details": {
+            "last_backup": latest_time.strftime("%Y-%m-%d %H:%M"),
+            "age_days": age_days,
+            "total_backups": len(backups),
+            "backup_files": backup_files
+        },
+        "recommendation": (
+            f"最近备份于 {age_days} 天前（超过30天），建议执行新的备份。"
+        ) if age_days > 30 else f"最近备份于 {age_days} 天前，状态正常。"
+    }
 
 
 def check_consistency(workspace=None):
@@ -257,8 +443,8 @@ def check_duplicates(workspace=None):
 
 def run_full_check(workspace=None, auto_fix=False):
     """
-    Run all self-check diagnostics.
-    If auto_fix=True, automatically resolve safe issues (e.g., archive confirmed duplicates).
+    Run all self-check diagnostics (v3.4.0: 9项 = 3物理 + 6逻辑).
+    If auto_fix=True, backup first, then resolve safe issues.
     """
     results = {
         "timestamp": get_timestamp(),
@@ -266,14 +452,20 @@ def run_full_check(workspace=None, auto_fix=False):
         "checks": {},
         "overall_status": "healthy",
         "total_issues": 0,
-        "auto_fixed": 0
+        "auto_fixed": 0,
+        "backup_info": None
     }
 
-    # Run all checks
+    # Run all checks (physical first, then logical)
     checks = [
+        # v3.4.0: 物理层
+        check_file_integrity(workspace),
+        check_index_integrity(workspace),
+        check_backup_freshness(workspace),
+        # 逻辑层
         check_consistency(workspace),
         check_timeliness(workspace),
-        check_temporal_validity(workspace),  # v2.1.0
+        check_temporal_validity(workspace),
         check_completeness(workspace),
         check_orphans(workspace),
         check_duplicates(workspace)
@@ -282,25 +474,39 @@ def run_full_check(workspace=None, auto_fix=False):
     for check in checks:
         check_name = check["check"]
         results["checks"][check_name] = check
-        if check["status"] != "healthy":
-            results["overall_status"] = "needs_attention"
+        if check["status"] in ("warning", "critical"):
+            if results["overall_status"] != "critical":
+                results["overall_status"] = (
+                    "critical" if check["status"] == "critical" else "needs_attention"
+                )
             results["total_issues"] += check["issues_found"]
 
-    # Auto-fix safe issues
-    if auto_fix:
+    # v3.4.0: Auto-fix with backup
+    if auto_fix and results["total_issues"] > 0:
+        results["backup_info"] = _create_backup(workspace, reason="pre_fix")
         fixed = 0
-        # Auto-archive very low confidence stale memories (confidence < 0.3)
-        timeliness = results["checks"]["timeliness"]
-        if timeliness["status"] != "healthy":
+
+        # Physical: rebuild index if needed
+        idx_check = results["checks"].get("index_integrity", {})
+        if idx_check.get("status") != "healthy":
+            try:
+                from sb_longterm import build_index
+                build_index(workspace)
+                fixed += 1
+            except Exception:
+                pass
+
+        # Logical: archive low-confidence stale, merge high-sim duplicates
+        timeliness = results["checks"].get("timeliness", {})
+        if timeliness.get("status") != "healthy":
             for item in timeliness.get("details", []):
                 if item.get("confidence", 1.0) < 0.3:
                     from sb_memory import update_memory
                     update_memory(item["id"], status="archived", workspace=workspace)
                     fixed += 1
 
-        # Auto-merge very high similarity duplicates (similarity > 0.95)
-        duplicates = results["checks"]["duplicates"]
-        if duplicates["status"] != "healthy":
+        duplicates = results["checks"].get("duplicates", {})
+        if duplicates.get("status") != "healthy":
             from sb_memory import merge_memories
             for dup in duplicates.get("details", []):
                 if dup.get("similarity", 0) > 0.95:
@@ -335,13 +541,38 @@ def get_health_report(workspace=None):
 def get_health_score(workspace=None):
     """
     Calculate a health score (0-100) based on the latest check.
-    Factors: consistency, timeliness, completeness, graph connectivity, duplication.
+    v3.4.0: includes physical integrity + backup + logical checks.
     """
     report = get_health_report(workspace)
     checks = report.get("checks", {})
 
     score = 100
-    # Each issue reduces score
+    # Physical checks (high penalty)
+    for chk in ["file_integrity", "index_integrity"]:
+        if chk in checks:
+            score -= min(30, checks[chk].get("issues_found", 0) * 15)
+    # Backup freshness
+    if "backup_freshness" in checks:
+        b_details = checks["backup_freshness"].get("details", {})
+        age = b_details.get("age_days", 0)
+        if age > 90: score -= 15
+        elif age > 30: score -= 5
+
+    # Logical checks
+    for check_name, check in checks.items():
+        issues = check.get("issues_found", 0)
+        if check_name == "duplicates":
+            score -= min(20, issues * 5)
+        elif check_name == "consistency":
+            score -= min(25, issues * 8)
+        elif check_name == "timeliness":
+            score -= min(15, issues * 3)
+        elif check_name == "completeness":
+            score -= min(15, issues * 3)
+        elif check_name == "temporal_validity":
+            score -= min(10, issues * 2)
+        elif check_name == "orphans":
+            score -= min(10, issues * 2)
     for check_name, check in checks.items():
         issues = check.get("issues_found", 0)
         if check_name == "duplicates":

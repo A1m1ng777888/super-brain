@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.4.0] — 2026-07-03
+
+### 新增 — 物理层自检 + Token ROI 量化
+
+基于与左脑 Skill 的对比测试反思，补上自检系统的物理存储层视角，并新增 Token 节省量化能力。
+
+- **自检 6→9 项**：新增 `check_file_integrity`（文件完整性）、`check_index_integrity`（索引可重建性）、`check_backup_freshness`（备份时效）三项物理层检查
+- **修复前自动备份**：`_create_backup()` 在 `--fix` 执行前自动备份全量数据（保留最近 5 次）
+- **Token ROI 量化**：新增 `sb_token_roi.py` 模块，用现有统计数据（access_count × 内容大小 × 压缩率）自动计算净收益和 ROI 比率
+- **CLI 新增**：`token-roi` / `token-roi --json` / `token-roi --days N` / `token-roi --quickline`（对话注入用）
+- **对话集成**：SKILL.md 对话收尾协议自动附带 Token ROI 简报
+- **测试**：91/91 全通过（76 原测试 + 9 自检 + 6 Token ROI）
+
+### 背景 — 2026-07-03 对比测试
+
+- 完成 24 项统一对比测试，超脑 20/24 vs 左脑 21/24
+- 核心能力（记忆/推理/摘要/因果/模糊查询/去重）双方均通过
+- 生成《超脑 vs 左脑 技术对比白皮书》作为法律防御材料
+- 本次升级的两项改进直接来自对比反思
+
 ## [3.3.0] — 2026-07-03
 
 ### 新增 — Goal Continuation 续跑机制
