@@ -18,6 +18,9 @@ Optimization loop:
 5. Update: if rejected, remember in buffer; if accepted, update current skill
 
 Edit budget = "textual learning rate" (default 4 edits per round)
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import json

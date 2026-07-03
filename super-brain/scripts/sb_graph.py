@@ -2,6 +2,9 @@
 """
 SuperBrain Knowledge Graph
 Entity-relationship network: nodes, edges, queries, entity alignment.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys

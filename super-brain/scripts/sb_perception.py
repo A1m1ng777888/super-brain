@@ -11,6 +11,9 @@ The perception module acts as a gatekeeper:
 
 This optimizes knowledge acquisition efficiency by avoiding redundant storage
 and ensuring important new information is always captured.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys

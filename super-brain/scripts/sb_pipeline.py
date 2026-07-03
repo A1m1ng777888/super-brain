@@ -14,6 +14,9 @@ Chitchat class (闲聊类): Casual conversation, greetings, transient comments
   - Auto-archived after decay period
 
 This module saves storage space by applying differentiated retention policies.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys

@@ -15,6 +15,9 @@ Core capabilities:
 
 This module creates "topic threads" — chains of memories that belong
 to the same conversation topic, regardless of when they were stored.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys

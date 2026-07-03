@@ -2,6 +2,9 @@
 """
 SuperBrain v3.0.0 Test Suite
 Tests all v3.0.0 modules for functionality and backward compatibility.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys

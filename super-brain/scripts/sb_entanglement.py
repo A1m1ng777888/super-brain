@@ -18,6 +18,9 @@ The entanglement field uses three signals:
 1. Ternary hash overlap (structural similarity)
 2. Co-occurrence frequency (statistical correlation)
 3. Graph proximity (topological distance in knowledge graph)
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys

@@ -4,6 +4,9 @@ SuperBrain Self-Check System
 Periodic diagnostics: consistency, timeliness, temporal_validity (v2.1.0),
 completeness, orphans, duplicates.
 Generates health reports and can auto-fix safe issues.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys

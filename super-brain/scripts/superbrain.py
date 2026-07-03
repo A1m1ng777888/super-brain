@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-SuperBrain CLI v2.1.0 — Unified entry point for the Super Brain skill.
-Provides subcommands for memory (v2.1 temporal), graph, search (v2.1 dynamic threshold),
-selfcheck (v2.1 temporal_validity), workspace, stats, skillopt (self-evolution),
-and trace (execution recording) management.
+SuperBrain CLI v3.2.2 — Unified entry point for the Super Brain skill.
+Provides subcommands for memory, graph, search, selfcheck, workspace, stats,
+skillopt (self-evolution), trace, orchestration, and Obsidian sync management.
 
 Usage:
     # Core commands
@@ -54,6 +53,9 @@ Usage:
     python superbrain.py trace list [--limit N]
     python superbrain.py trace stats
     python superbrain.py trace export [--output PATH]
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys
@@ -122,7 +124,11 @@ from sb_orchestrator import (
     should_orchestrate, decompose_task, generate_sub_agent_specs,
     get_orchestration_stats, reset_circuit_breaker, orchestrate,
     select_minimal_tools, TOOL_PROFILES, record_spawn, record_complete,
-    record_failure, run_tests as run_orch_tests
+    record_failure, run_tests as run_orch_tests,
+    # v3.3.0
+    evaluate_goal_completion, should_continue_goal, record_continuation,
+    reset_continuation_state, get_goal_status, orchestrate_continue,
+    _hash_results, MAX_CONTINUATIONS
 )
 
 
@@ -905,6 +911,50 @@ def cmd_orch_profiles(args):
     print_json(profiles)
 
 
+# ─── v3.3.0: Goal Continuation CLI handlers ──────────────────────────────
+
+def cmd_orch_evaluate(args):
+    """Evaluate goal completion from sub-results."""
+    import json
+    try:
+        results = json.loads(args.results)
+    except json.JSONDecodeError:
+        print_json({"error": "Invalid JSON for --results"})
+        sys.exit(1)
+    result = evaluate_goal_completion(results, args.workspace)
+    print_json(result)
+
+
+def cmd_orch_continue(args):
+    """Attempt continuation for an incomplete orchestration."""
+    import json
+    try:
+        results = json.loads(args.results)
+    except json.JSONDecodeError:
+        print_json({"error": "Invalid JSON for --results"})
+        sys.exit(1)
+
+    result = orchestrate_continue(
+        args.orchestration_id,
+        args.task,
+        results,
+        current_context_size=args.context_size,
+        workspace=args.workspace
+    )
+    print_json(result)
+
+
+def cmd_orch_goal_status(args):
+    """Get goal continuation status for an orchestration."""
+    result = get_goal_status(args.orchestration_id, args.workspace)
+    print_json(result)
+
+
+def cmd_orch_continuation_reset(args):
+    """Reset continuation state."""
+    print_json(reset_continuation_state(args.workspace))
+
+
 def build_parser():
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
@@ -1348,7 +1398,7 @@ def build_parser():
 
     sp = obsidian_sub.add_parser("export", help="Export all memories to .md + [[wikilinks]]")
     sp.add_argument("--workspace", help="Workspace name")
-    sp.add_argument("--vault-path", help="Obsidian vault path (default: E:/AAA本地知识库v1/本地知识库v1)")
+    sp.add_argument("--vault-path", help="Obsidian vault path (set OBSIDIAN_VAULT_PATH env var or defaults to ~/ObsidianVault)")
     sp.add_argument("--no-graph", action="store_true", help="Skip graph edges")
     sp.set_defaults(func=cmd_obsidian_export)
 
@@ -1408,6 +1458,29 @@ def build_parser():
 
     sp = orch_sub.add_parser("profiles", help="List tool profiles")
     sp.set_defaults(func=cmd_orch_profiles)
+
+    # v3.3.0: Goal Continuation commands
+    sp = orch_sub.add_parser("evaluate", help="Evaluate goal completion status")
+    sp.add_argument("--results", required=True, help="JSON array of sub-results")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_evaluate)
+
+    sp = orch_sub.add_parser("continue", help="Check if continuation is warranted and re-orchestrate")
+    sp.add_argument("--orchestration-id", required=True, help="Orchestration ID")
+    sp.add_argument("task", help="Original or refined task description")
+    sp.add_argument("--results", required=True, help="JSON array of previous sub-results")
+    sp.add_argument("--context-size", type=int, default=0)
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_continue)
+
+    sp = orch_sub.add_parser("goal-status", help="Get goal continuation status")
+    sp.add_argument("--orchestration-id", required=True, help="Orchestration ID")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_goal_status)
+
+    sp = orch_sub.add_parser("continuation-reset", help="Reset continuation state")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_orch_continuation_reset)
 
     return parser
 

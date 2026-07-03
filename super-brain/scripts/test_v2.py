@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""SuperBrain v2.0.0 — sb_trace + sb_skillopt test suite."""
+"""SuperBrain v2.0.0 — sb_trace + sb_skillopt test suite.
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
+"""
 
 import sys
 import os

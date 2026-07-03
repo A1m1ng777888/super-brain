@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""SuperBrain end-to-end test suite."""
+"""SuperBrain end-to-end test suite.
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
+"""
 import sys
 import os
 import json

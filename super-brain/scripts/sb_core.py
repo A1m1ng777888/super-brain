@@ -2,6 +2,9 @@
 """
 SuperBrain Core - Infrastructure layer
 Config management, workspace isolation, file I/O, ID generation.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import json

@@ -11,6 +11,9 @@ The reasoning engine provides structured analysis capabilities:
 
 All reasoning is rule-based and deterministic (no LLM calls), making it
 fast, predictable, and zero-cost in terms of tokens.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys

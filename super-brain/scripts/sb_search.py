@@ -10,6 +10,9 @@ v3.0.0 additions:
 - Word network (字词网络): token-level entanglement graph for query expansion
 - Levenshtein distance for typo-tolerant matching
 - Enhanced tokenize with CJK trigram support
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import hashlib

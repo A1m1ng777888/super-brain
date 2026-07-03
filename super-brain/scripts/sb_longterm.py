@@ -14,6 +14,9 @@ management with minimal token overhead:
 "Zero-cost" means retrieval doesn't require loading all memories into context;
 instead, a pre-computed index allows direct lookup of relevant memories,
 dramatically reducing token consumption.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys

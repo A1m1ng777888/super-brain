@@ -8,6 +8,9 @@ Design principles:
 - Exported .md files are read-only views (reverse sync optional)
 - [[wikilinks]] between memories mirror graph.json edges
 - Auto-links to existing vault notes when entity/project names match
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys
@@ -21,8 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sb_core import read_memories, read_graph, read_meta, get_timestamp, ensure_workspace
 
 
-# Default Obsidian vault path (from user config)
-DEFAULT_VAULT_PATH = "E:/AAA本地知识库v1/本地知识库v1"
+# Default Obsidian vault path — use env var or fall back to generic path
+DEFAULT_VAULT_PATH = os.environ.get("OBSIDIAN_VAULT_PATH", os.path.expanduser("~/ObsidianVault"))
 DEFAULT_EXPORT_DIR = "超脑记忆"
 
 # Frontmatter field mapping: memory attributes → Obsidian frontmatter

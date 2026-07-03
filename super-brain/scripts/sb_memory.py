@@ -3,6 +3,9 @@
 SuperBrain Memory Engine v3.0.0
 Memory CRUD, confidence management, merging, time-decay retrieval.
 v3.0.0: Auto-store, cross-session association, typo correction, expression learning.
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 """
 
 import sys
