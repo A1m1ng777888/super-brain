@@ -163,7 +163,7 @@ section("Self-Check (sb_selfcheck)")
 # Run full check
 report = run_full_check(auto_fix=False)
 test("Self-check returns report", "checks" in report, "No checks in report")
-test("Self-check has 5 checks", len(report.get("checks", {})) == 5, f"Got {len(report.get('checks', {}))} checks")
+test("Self-check has 9 checks", len(report.get("checks", {})) == 9, f"Got {len(report.get('checks', {}))} checks")
 test("Self-check has timestamp", "timestamp" in report, "Missing timestamp")
 test("Self-check has overall status", "overall_status" in report, "Missing overall status")
 

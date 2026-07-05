@@ -570,8 +570,16 @@ def cmd_trace_record(args):
     """Record an execution trace (usually called programmatically)."""
     import json as json_mod
     
-    input_data = json_mod.loads(args.input) if args.input else {}
-    output_data = json_mod.loads(args.output) if args.output else {}
+    try:
+        input_data = json_mod.loads(args.input) if args.input else {}
+    except json_mod.JSONDecodeError as e:
+        print(f"Error: invalid JSON in --input: {e}")
+        return
+    try:
+        output_data = json_mod.loads(args.output) if args.output else {}
+    except json_mod.JSONDecodeError as e:
+        print(f"Error: invalid JSON in --output: {e}")
+        return
     
     trace = record_trace(
         command=args.command,
@@ -1065,7 +1073,7 @@ def build_parser():
     sp = graph_sub.add_parser("add-node", help="Add a graph node")
     sp.add_argument("--name", required=True, help="Node name")
     sp.add_argument("--type", default="concept", choices=NODE_TYPES, help="Node type")
-    sp.add_argument("--aliases", help="Comma-separated aliases")
+    sp.add_argument("--aliases", help="Comma-separated aliases (e.g. --aliases \"AI,机器学习,人工智能\")")
     sp.add_argument("--description", help="Node description")
     sp.set_defaults(func=cmd_graph_add_node)
 

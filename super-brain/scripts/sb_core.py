@@ -21,7 +21,7 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 
 # Default config
 DEFAULT_CONFIG = {
-    "version": "3.0.0",
+    "version": "3.4.1",
     "data_dir": DEFAULT_DATA_DIR,
     "current_workspace": "default",
     "simhash_bits": 64,
