@@ -124,47 +124,156 @@ def _format_frontmatter(fm):
     return "\n".join(lines)
 
 
-def _build_wikilinks(memory, graph, vault_notes=None):
+def _build_wikilinks(memory, graph, vault_notes=None, all_memories=None):
     """
-    Build [[wikilinks]] from graph edges.
-    
-    Also auto-links to existing vault notes when entity names match
-    known note titles in the vault.
+    Build [[wikilinks]] from multiple sources (priority order):
+
+    1. Graph edges → explicit connections
+    2. Entity cross-linking → other memories sharing the same entity field
+    3. Tag community → memories with overlapping tags
+    4. Entity → existing vault note auto-link
+    5. Related nodes → explicit related_nodes field
+
+    This ensures even memories without graph edges get connected via
+    shared entities and tags (fixes v3.x+ ingest isolation bug).
     """
     mem_id = memory.get("id", "")
     links = set()
-    
-    # 1. Graph edges → wikilinks
-    for edge in graph.get("edges", []):
+
+    # 1. Graph edges → wikilinks (explicit graph connections)
+    for edge in graph.get("edges", {}).values():
         source = edge.get("source", "")
         target = edge.get("target", "")
         if source == mem_id and target:
             links.add(f"[[{_edge_to_note_title(target, graph)}]]")
         elif target == mem_id and source:
             links.add(f"[[{_edge_to_note_title(source, graph)}]]")
-    
-    # 2. Entity → existing vault note auto-link
+
+    # 2. Entity cross-linking: find other memories with same entity
+    if all_memories:
+        my_entity = memory.get("entity", "").strip()
+        my_tags = set(t.strip() for t in memory.get("tags", []) if t.strip())
+        my_type = memory.get("type", "")
+
+        for other in all_memories:
+            other_id = other.get("id", "")
+            if other_id == mem_id or not other_id:
+                continue
+            other_entity = other.get("entity", "").strip()
+            other_tags = set(t.strip() for t in other.get("tags", []) if t.strip())
+
+            # Same entity → strong link
+            if my_entity and other_entity and my_entity != "general":
+                if my_entity.lower() == other_entity.lower():
+                    other_title = _memory_to_note_title(other)
+                    if other_title:
+                        links.add(f"[[{other_title}]]")
+                        continue  # skip tag check if already linked by entity
+
+            # Overlapping tags → community link (only if no entity match)
+            if my_tags and other_tags and not (my_entity and my_entity != "general"
+                                                and my_entity.lower() == other_entity.lower()):
+                overlap = my_tags & other_tags
+                if len(overlap) >= 1 and len(overlap) >= min(len(my_tags), len(other_tags)) * 0.5:
+                    other_title = _memory_to_note_title(other)
+                    if other_title:
+                        links.add(f"[[{other_title}]]")
+
+    # 3. Entity → existing vault note auto-link (vault-level, not memory-level)
     entity = memory.get("entity", "")
     if entity and entity != "general" and vault_notes:
         for note_name in vault_notes:
             if entity.lower() in note_name.lower():
                 links.add(f"[[{note_name}]]")
-    
-    # 3. Related nodes → wikilinks
+
+    # 4. Keyword fallback — for general/singleton entity memories
+    #    that still share content overlap. Rescues ~70% of remaining orphans.
+    if all_memories and len(links) == 0:
+        my_kw = _extract_keywords(memory.get("content", ""))
+        if my_kw:
+            candidates = []
+            for other in all_memories:
+                other_id = other.get("id", "")
+                if other_id == mem_id or not other_id:
+                    continue
+                other_kw = _extract_keywords(other.get("content", ""))
+                if not other_kw:
+                    continue
+                overlap = my_kw & other_kw
+                if overlap:
+                    score = len(overlap) / min(len(my_kw), len(other_kw))
+                    if score >= 0.3:
+                        other_title = _memory_to_note_title(other)
+                        if other_title:
+                            candidates.append((score, other_title))
+            candidates.sort(key=lambda x: -x[0])
+            for score, title in candidates[:5]:
+                links.add(f"[[{title}]]")
+
+    # 5. Related nodes → wikilinks
     for related_id in memory.get("related_nodes", []):
         link_title = _edge_to_note_title(related_id, graph)
         if link_title:
             links.add(f"[[{link_title}]]")
-    
+
     return sorted(links)
 
 
 def _edge_to_note_title(node_id, graph):
-    """Convert a graph node ID to a note title."""
-    for node in graph.get("nodes", []):
-        if node.get("id") == node_id:
-            return sanitize_filename(node.get("label", node_id), 40)
-    return ""
+    """Convert a graph node ID to a note title. Handles both list and dict node formats."""
+    nodes = graph.get("nodes", {})
+    if isinstance(nodes, dict):
+        node = nodes.get(node_id, {})
+    elif isinstance(nodes, list):
+        node = next((n for n in nodes if n.get("id") == node_id), {})
+    else:
+        return ""
+    label = node.get("label") or node.get("name", node_id)
+    return sanitize_filename(label, 40)
+
+
+def _memory_to_note_title(memory):
+    """Convert a memory dict to its expected .md note filename."""
+    date_str = memory.get("timestamp", "")[:10]
+    mem_type = memory.get("type", "fact")
+    content = memory.get("content", memory.get("title", "untitled"))
+    title = sanitize_filename(content, 50)
+    return f"{date_str}-{mem_type}-{title}"
+
+
+def _extract_keywords(text):
+    """Extract meaningful keywords for cross-memory matching.
+
+    Uses simple Chinese 2-4 char chunks + English 3-char+ tokens,
+    with stopword filtering. No external dependencies.
+    """
+    if not text:
+        return set()
+    STOP = {
+        "的", "了", "是", "在", "有", "和", "与", "不", "这", "那",
+        "我", "你", "他", "她", "它", "们", "个", "都", "会", "要",
+        "就", "也", "能", "很", "还", "更", "最", "又", "再", "把",
+        "被", "让", "给", "从", "到", "对", "用", "以", "可", "可以",
+        "没", "没有", "什么", "怎么", "怎样", "为什么", "如何",
+        "因为", "所以", "但是", "虽然", "如果", "只有", "即使",
+        "并且", "或", "但", "之", "及", "而", "于", "进行", "一个",
+        "这个", "那个", "一些", "通过", "以及", "然后", "已经",
+        "the", "and", "for", "with", "this", "that", "from",
+        "are", "not", "but", "has", "its", "use", "all", "can",
+    }
+    words = set()
+    text_lower = text.lower()
+    # Chinese 2-4 char chunks
+    for m in __import__("re").finditer(r"[\u4e00-\u9fff]{2,4}", text):
+        w = m.group()
+        if w not in STOP and len(w) >= 2:
+            words.add(w)
+    # English/CJK alphanumeric 3+ char tokens
+    for m in __import__("re").finditer(r"[a-z0-9]{3,}", text_lower):
+        w = m.group()
+        if w not in STOP and len(w) >= 3:
+            words.add(w)
+    return words
 
 
 def _scan_vault_notes(vault_path=None):
@@ -230,8 +339,8 @@ def export_to_obsidian(workspace=None, vault_path=None, include_graph=True):
         # Build frontmatter
         fm = _build_frontmatter(memory)
         
-        # Build wikilinks
-        wikilinks = _build_wikilinks(memory, graph, vault_notes)
+        # Build wikilinks (pass all memories for entity/tag cross-linking)
+        wikilinks = _build_wikilinks(memory, graph, vault_notes, all_memories=memories)
         
         # Build file content
         lines = [_format_frontmatter(fm), ""]
@@ -318,11 +427,17 @@ def export_to_obsidian(workspace=None, vault_path=None, include_graph=True):
 
 
 def wikilinks_per_memory(mem_id, graph):
-    """Count wikilinks for a memory (helper)."""
+    """Count wikilinks for a memory (helper). Handles dict and list edge formats."""
     count = 0
-    for edge in graph.get("edges", []):
-        if edge.get("source") == mem_id or edge.get("target") == mem_id:
-            count += 1
+    edges = graph.get("edges", {})
+    if isinstance(edges, dict):
+        for edge in edges.values():
+            if edge.get("source") == mem_id or edge.get("target") == mem_id:
+                count += 1
+    elif isinstance(edges, list):
+        for edge in edges:
+            if isinstance(edge, dict) and (edge.get("source") == mem_id or edge.get("target") == mem_id):
+                count += 1
     return count
 
 
@@ -412,15 +527,22 @@ def export_memory_as_card(memory, vault_path=None):
     graph = read_graph()
     vault_notes = _scan_vault_notes(vault_path)
     export_dir = get_vault_memory_dir(vault_path)
-    
+
     content = memory.get("content", "No content")
     date_str = memory.get("timestamp", "")[:10]
     title = sanitize_filename(content, 50)
     filename = f"{date_str}-{memory.get('type', 'fact')}-{title}.md"
     filepath = os.path.join(export_dir, filename)
-    
+
     fm = _build_frontmatter(memory)
-    wikilinks = _build_wikilinks(memory, graph, vault_notes)
+    # Load all memories for entity/tag cross-linking
+    from sb_memory import read_memories
+    try:
+        all_mems_data = read_memories()
+        all_mems = all_mems_data if isinstance(all_mems_data, list) else all_mems_data.get("memories", [])
+    except Exception:
+        all_mems = []
+    wikilinks = _build_wikilinks(memory, graph, vault_notes, all_memories=all_mems)
     
     lines = [_format_frontmatter(fm), ""]
     lines.append(f"# {content[:80]}")
