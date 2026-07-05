@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.4.2] — 2026-07-05
+
+### 修复 — 扣子 Linux 云端测试 (5项)
+
+基于扣子 Agent Linux 云端测试报告（Python 3.13.12, 210/211 测试通过），修复全部已发现的跨平台兼容性和代码质量问题。
+
+- **P0**：新增 `.gitattributes`，`*.py` / `*.sh` 强制 LF 换行符，解决 Linux 直接执行失败
+- **P1**：`superbrain.py` `cmd_trace_record` 添加 `try/except JSONDecodeError`，传入非 JSON 参数不再崩溃
+- **P2**：`sb_core.py` `DEFAULT_CONFIG["version"]` 从 `3.0.0` 修正为 `3.4.2`
+- **P3**：`test_superbrain.py` 自检断言从 5 项更新为 9 项（匹配 v3.4.0 升级）
+- **P4**：`superbrain.py` `graph add-node --aliases` 帮助文本添加格式示例
+
+### 测试
+
+- 测试保持 211 项（test_superbrain 49 + test_v2 71 + test_v3 91），P3 修复后 test_superbrain 自检断言全绿
+- 核心功能无变更，纯 bug fix patch
+
 ## [3.4.1] — 2026-07-04
 
 ### 修复 — T2 阶段感知自动触发协议

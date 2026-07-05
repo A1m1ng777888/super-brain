@@ -1,17 +1,19 @@
 ---
 name: super-brain
-version: v3.4.1
-released: 2026-07-04
+version: v3.4.2
+released: 2026-07-05
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.4.0。物理层自检(文件完整性+索引可重建性+备份时效)→修复前自动备份 + Token ROI 量化(净收益/分类节省/ROI比率)。基础功能：Goal Continuation 续跑机制+前置编配评估始终在线+正式评估+分解+规格生成+Goal评估+续跑+执行。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、remember、recall、reason、entangle、perceive"
+description: "Super Brain 超脑认知增强技能 v3.4.2。扣子Linux云端测试修复：CRLF→LF跨平台(.gitattributes)+trace JSON异常捕获+版本号同步+测试断言更新+aliases文档统一。基础功能：Goal Continuation 续跑机制+前置编配评估始终在线+正式评估+分解+规格生成+Goal评估+续跑+执行+T2阶段感知自动触发。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、remember、recall、reason、entangle、perceive"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.4.1
+# Super Brain (超脑) — 认知增强技能 v3.4.2
 
 ## 概述
 
 超脑是一个认知增强系统，为 AI 提供**持久记忆、知识图谱、语义搜索、自动推理、关联挖掘、对话即入库、分类管线、感知增强、子Agent编排**等核心能力。它解决了 AI Agent 的先天缺陷：跨会话失忆、上下文断裂、搜索低效、知识孤岛、无法推理、表达不通、单Agent上下文污染。
+
+**v3.4.2 升级：扣子 Linux 云端测试修复。** 基于扣子 Agent Linux 云端测试报告（210/211 测试通过），修复 5 项跨平台兼容性 Bug：P0 新增 .gitattributes 解决 CRLF 换行符问题、P1 trace record JSON 解析添加异常捕获防崩溃、P2 sb_core.py 版本号同步至 3.4.2、P3 test_superbrain.py 自检断言更新(5→9)、P4 aliases 帮助文本添加格式示例。
 
 **v3.4.1 升级：T2 阶段感知自动触发。** 修复会话生命周期 T2 协议的根本架构缺陷——触发不再靠 Agent 记忆，改为强制规则 #6 + 四类阶段转换信号（精力信号/话题转向/里程碑达成/自然断开）。Agent 自主判断阶段结束，不经用户催促执行收尾。
 
@@ -451,6 +453,7 @@ v3.0.0 搜索引擎融合六个信号通道：
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.4.2** | 2026-07-05 | 扣子 Linux 云端测试修复(5项)：P0 新增 .gitattributes 跨平台换行符管理(*.py/*.sh 强制 LF)、P1 trace record JSON 解析添加 try/except 防崩溃、P2 sb_core.py 版本号 3.0.0→3.4.2、P3 test_superbrain.py 自检断言 5→9、P4 aliases 帮助文本添加格式示例。测试保持 211 项，核心功能无变更。 |
 | **v3.4.1** | 2026-07-04 | T2 阶段感知自动触发协议：修复会话生命周期 T2 协议的架构缺陷——从依赖 Agent 记忆触发升级为强制规则 #6 + 四类阶段转换信号检测（精力信号/话题转向/里程碑达成/自然断开）。Agent 自主判断阶段结束，不经用户催促执行 T2 收尾（selfcheck + ROI + 日志）。 |
 | **v3.4.0** | 2026-07-03 | 物理层自检升级(9项=3物理+6逻辑)：文件完整性+索引可重建性+备份时效，修复前自动备份(keep 5)。Token ROI 量化模块：净收益/分类节省/ROI比率/负ROI告警。新增 `sb_token_roi.py`，CLI 新增 `token-roi` 命令。91项测试全通过。 | Goal Continuation 续跑机制：结构化目标评估(`evaluate_goal_completion`)+四道闸门(达成/上限/abort/停滞)+SHA256停滞检测+A4次续跑上限、零LLM开销。新增CLI命令evaluate/continue/goal-status/continuation-reset。88项测试全通过。 |
 | **v3.2.2** | 2026-07-02 | 前置编配评估提升至 SOUL.md Continuity 层：四问判断逻辑（上下文量/并行度/能力差异/隐含范围）始终在线，不依赖 skill 加载。Agent 自主快速判断→需要时才加载本 skill 执行 orchestrate 正式评估。 |
