@@ -21,7 +21,7 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 
 # Default config
 DEFAULT_CONFIG = {
-    "version": "3.4.1",
+    "version": "3.5.0",
     "data_dir": DEFAULT_DATA_DIR,
     "current_workspace": "default",
     "simhash_bits": 64,
@@ -176,7 +176,10 @@ def read_json(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (json.JSONDecodeError, IOError) as e:
+        # v3.4.3 fix: warn instead of silent None — prevents read_memories
+        # from returning [] and causing write_memories to overwrite with loss
+        print(f"  ⚠ read_json: failed to parse {path}: {e}", file=sys.stderr)
         return None
 
 
@@ -191,7 +194,20 @@ def read_memories(workspace=None):
     """Read all memories from workspace."""
     ws_dir = ensure_workspace(workspace)
     path = os.path.join(ws_dir, "memories.json")
-    return read_json(path) or []
+    data = read_json(path)
+    if data is None:
+        if os.path.exists(path):
+            # v3.4.3 fix: file exists but JSON is corrupt — do NOT return []
+            # Returning [] would cause write_memories to overwrite and lose data.
+            # Instead, back up the corrupt file and return [] only after backup.
+            import shutil, time
+            backup_name = f"memories_corrupt_backup_{int(time.time())}.json"
+            backup_path = os.path.join(ws_dir, backup_name)
+            shutil.copy2(path, backup_path)
+            print(f"  ⚠ read_memories: JSON corrupt — backed up to {backup_name}", file=sys.stderr)
+            print(f"  ⚠ read_memories: returning empty list (corrupt file backed up, not deleted)", file=sys.stderr)
+        return []
+    return data
 
 
 def write_memories(memories, workspace=None):

@@ -11,7 +11,8 @@ import json
 SCRIPT_DIR = os.path.join(os.path.expanduser("~"), ".workbuddy", "skills", "super-brain", "scripts")
 sys.path.insert(0, SCRIPT_DIR)
 
-from sb_core import ensure_workspace, write_memories, write_graph, load_config, save_config
+from sb_core import (ensure_workspace, write_memories, write_graph, load_config, save_config,
+                     switch_workspace, list_workspaces)
 from sb_memory import add_memory, list_memories, search, get_context, merge_memories, get_stats, find_issues
 from sb_graph import add_node, add_edge, query_graph, find_node, list_nodes, get_stats as get_graph_stats, delete_node
 from sb_search import simhash, simhash_similarity, hamming_distance, tf_idf_cosine_similarity, tokenize, find_duplicates
@@ -34,13 +35,15 @@ def test(name, condition, detail=""):
 def section(title):
     print(f"\n=== {title} ===")
 
-# === SETUP: Clean workspaces ===
+# === SETUP: Clean test workspace and switch into it ===
 section("Setup")
-for ws in ["default", "test"]:
+_original_workspace = load_config().get("current_workspace", "default")
+for ws in ["test"]:
     ensure_workspace(ws)
     write_memories([], ws)
     write_graph({"nodes": {}, "edges": {}}, ws)
-print("  Workspaces cleaned.")
+switch_workspace("test")
+print(f"  Test workspace cleaned and activated. (original workspace: {_original_workspace})")
 
 # === TEST: Search Engine ===
 section("Search Engine (sb_search)")
@@ -192,7 +195,6 @@ if issues.get("duplicates"):
 # === TEST: Workspace ===
 section("Workspace Management")
 
-from sb_core import switch_workspace, list_workspaces
 ensure_workspace("test-project")
 ws_list = list_workspaces()
 test("Workspace list includes default", "default" in ws_list, f"Got {ws_list}")
@@ -209,9 +211,10 @@ if errors:
         print(f"    - {e}")
 
 # Cleanup
-for ws in ["default", "test"]:
+for ws in ["test"]:
     write_memories([], ws)
     write_graph({"nodes": {}, "edges": {}}, ws)
-print("\n  Test data cleaned.")
+switch_workspace(_original_workspace)
+print(f"\n  Test data cleaned. Workspace restored to {_original_workspace}.")
 
 sys.exit(0 if failed == 0 else 1)

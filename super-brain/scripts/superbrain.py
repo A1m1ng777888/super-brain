@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SuperBrain CLI v3.2.2 — Unified entry point for the Super Brain skill.
+SuperBrain CLI v3.5.0 — Unified entry point for the Super Brain skill.
 Provides subcommands for memory, graph, search, selfcheck, workspace, stats,
 skillopt (self-evolution), trace, orchestration, and Obsidian sync management.
 
@@ -415,8 +415,14 @@ def cmd_stats(args):
 
 def cmd_token_roi(args):
     """v3.4.0: Show Token ROI quantification."""
-    from sb_token_roi import get_token_roi_summary, calc_token_roi, get_roi_quickline
-    if args.quickline:
+    from sb_token_roi import get_token_roi_summary, calc_token_roi, get_roi_quickline, generate_dashboard_html
+    if args.dashboard:
+        output = generate_dashboard_html(recent_days=args.days, output_path=args.dashboard, trend_days=args.trend_days)
+        if output:
+            print(f"[SB] Dashboard generated: {output}")
+        else:
+            print("[SB] Dashboard generation failed (no data?).", file=sys.stderr)
+    elif args.quickline:
         print(get_roi_quickline(recent_days=args.days))
     elif args.json:
         data = calc_token_roi(recent_days=args.days)
@@ -1141,6 +1147,10 @@ def build_parser():
     sp_roi.add_argument("--json", action="store_true", help="Output full JSON data")
     sp_roi.add_argument("--days", type=int, default=None, help="Only count recent N days")
     sp_roi.add_argument("--quickline", action="store_true", help="One-line summary for dialog injection")
+    sp_roi.add_argument("--dashboard", type=str, nargs="?", const="token-roi-dashboard.html",
+                        help="Generate interactive HTML dashboard (optional: output path)")
+    sp_roi.add_argument("--trend-days", type=int, default=30,
+                        help="Number of days for dashboard trend chart (default: 30)")
     sp_roi.set_defaults(func=cmd_token_roi)
 
     # version
