@@ -1,19 +1,21 @@
 ---
 name: super-brain
-version: v3.5.0
-released: 2026-07-07
+version: v3.6.0
+released: 2026-07-08
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.5.0。Token ROI 仪表盘升级（30天趋势图 + 负 ROI 诊断 + 可行动建议 + 交互式 HTML 看板 + Obsidian Dataview 看板 + CLI --dashboard/--trend-days）。P0数据安全修复：read_json解析失败时打印警告而非静默返回None，read_memories在文件损坏时自动备份再返回[]，防止memory add覆盖丢失全部记忆。基础功能：Goal Continuation 续跑机制+前置编配评估始终在线+正式评估+分解+规格生成+Goal评估+续跑+执行+T2阶段感知自动触发。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、remember、recall、reason、entangle、perceive"
+description: "Super Brain 超脑认知增强技能 v3.6.0。全局工作空间门控层（Global Workspace Gating）：受 Anthropic《A Global Workspace in Language Models》(2026-07-06) 启发，记忆分冷存储与活跃工作空间两层，按显著度(salience)晋升、容量上限(cap)约束、链式点燃(chain-ignite)实现 Ignition；新增 reasoning_intermediate 记忆类型与 reason capture 中间推理捕获。基础功能：Goal Continuation 续跑机制+前置编配评估始终在线+正式评估+分解+规格生成+Goal评估+续跑+执行+T2阶段感知自动触发。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、工作空间、门控、reason、entangle、perceive"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.5.0
+# Super Brain (超脑) — 认知增强技能 v3.6.0
 
 ## 概述
 
 超脑是一个认知增强系统，为 AI 提供**持久记忆、知识图谱、语义搜索、自动推理、关联挖掘、对话即入库、分类管线、感知增强、子Agent编排**等核心能力。它解决了 AI Agent 的先天缺陷：跨会话失忆、上下文断裂、搜索低效、知识孤岛、无法推理、表达不通、单Agent上下文污染。
 
 **v3.5.0 升级：Token ROI 仪表盘全面升级（最终迭代）。** 三大新增——① **30天趋势图**（`calc_token_roi_trend()` 按日回溯快照，双 Y 轴折线图显示净节省+记忆数变化）；② **负 ROI 诊断**（每条记忆的 `recommendation` 字段——零访问建议归档、高存储成本建议精简、一般负收益建议主动引用）；③ **交互式 HTML 看板**（`SB token-roi --dashboard` 一键生成，含趋势折线图+分类柱状图+类型环形图+Top 节省排行+负 ROI 诊断表）。同时修复 `test_superbrain.py` workspace 隔离问题（不再清空 production workspace，测试后恢复原始 workspace）。49/49 测试全通过。
+
+**v3.6.0 升级：全局工作空间门控层（Global Workspace Gating）。** 受 Anthropic《A Global Workspace in Language Models》(2026-07-06) 启发，把"对话即入库全量提升进工作空间"的反 GWT 选择性问题修复为两层架构：① **冷存储 / 活跃工作空间分离**——记忆默认躺在冷存储，只有显著度(salience)跨过晋升阈值(threshold)才进入参与推理、注入上下文的"全局工作空间"；② **显著度多信号加权**——confidence/recency/access_count/entanglement/type 基线，reasoning_intermediate 基线最冷(-0.25)以免淹没工作空间；③ **链式点燃(chain-ignite)**——推理链任一节点晋升→整条链 Ignition 晋升（对应论文 Ignition 的竞争性/突变/广播）；④ **容量上限(cap)** 约束工作空间规模，mirror GWT 有限容量；⑤ **reasoning_intermediate 记忆类型** + `reason capture` 中间推理捕获，把驱动结论的中间概念变成一等可检索记忆。新增 `gating` 子命令（status/active/promote/demote/threshold/calibrate）与 `memory context --workspace-only` 选择性过滤。25/25 v3.6 测试 + 49/49 回归全通过。
 
 **v3.4.3 升级：P0 数据安全修复。** 修复 `read_json()` 在 JSON 解析失败时静默返回 None 的缺陷——这导致 `read_memories()` 返回空列表，进而 `memory add` 用仅含新记忆的列表覆盖整个文件，造成全部历史记忆丢失。修复方案：`read_json()` 解析失败时打印 stderr 警告；`read_memories()` 检测到文件存在但解析失败时，先自动备份损坏文件再返回空列表。同时修复 v3.4.2 未生效的版本号同步问题（sb_core.py 仍为 3.4.1）。
 
@@ -389,6 +391,19 @@ v3.0.0 搜索引擎融合六个信号通道：
 
 ## 命令参考
 
+### v3.6.0 新增命令（全局工作空间门控层）
+
+| 命令 | 用途 |
+|------|------|
+| `gating status` | 查看门控状态（阈值 / 容量 / 晋升比例） |
+| `gating active [--limit N]` | 列出当前晋升进全局工作空间的记忆 |
+| `gating promote --id ID` | 强制晋升单条记忆（覆盖显著度） |
+| `gating demote --id ID` | 强制把单条记忆移出工作空间 |
+| `gating threshold [--value 0-1]` | 读取或设置晋升显著度阈值（默认 0.35） |
+| `gating calibrate [--threshold 0-1]` | 报告各阈值下的晋升比例，调向 GWT 8-25% 区间 |
+| `reason capture --text "..."` | 把一段文本的推理链捕获为 `reasoning_intermediate` 记忆（共享 chain_id + 双向 related_nodes） |
+| `memory context "query" --workspace-only` | 仅检索已晋升进全局工作空间的记忆（GWT 选择性广播） |
+
 ### v3.4.0 新增命令
 
 | 命令 | 用途 |
@@ -460,6 +475,7 @@ v3.0.0 搜索引擎融合六个信号通道：
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.6.0** | **2026-07-08** | **全局工作空间门控层（Global Workspace Gating）：** 受 Anthropic《A Global Workspace in Language Models》(2026-07-06) 启发，把"对话即入库全量提升"的反 GWT 选择性问题修复为冷存储/活跃工作空间两层架构。新增 `sb_gating.py`（compute_salience 多信号显著度、get_threshold/set_threshold、is_promoted、chain_ignite 链式点燃、get_active_workspace 容量上限、promote/demote、calibrate、get_status）。`sb_memory.py` 新增 `reasoning_intermediate` 记忆类型与 salience/chain_id/reasoning_role/workspace_promoted 四字段；`get_context` 新增 `--workspace-only` 选择性过滤并透出 workspace_promoted 标志。`sb_reasoning.py` 新增 `capture_reasoning_chain` 中间推理捕获（共享顶层 chain_id + 双向 related_nodes）。CLI 新增 `gating` 子命令与 `reason capture`、`memory context --workspace-only`。25/25 v3.6 测试 + 49/49 回归全通过。 |
 | **v3.5.0** | **2026-07-07** | **Token ROI 仪表盘全面升级：** `calc_token_roi_trend()` 30天趋势回溯、每条记忆 `recommendation` 可行动建议、`generate_dashboard_html()` 新增趋势折线图和负 ROI 诊断表、CLI 新增 `--dashboard` 和 `--trend-days` 标志、Obsidian Dataview 看板同步更新。修复 `test_superbrain.py` workspace 隔离（不再清空 production 数据）。49/49 测试全通过。 |
 | **v3.4.3** | 2026-07-06 | P0 数据安全修复：`read_json()` JSON解析失败时从静默返回None改为打印stderr警告；`read_memories()` 在文件存在但解析失败时自动备份损坏文件再返回[]（而非直接返回[]导致write_memories覆盖丢失全部记忆）。修复sb_core.py版本号3.4.1→3.4.3（v3.4.2的P2修复未生效）。 |
 | **v3.4.2** | 2026-07-05 | 扣子 Linux 云端测试修复(5项)：P0 新增 .gitattributes 跨平台换行符管理(*.py/*.sh 强制 LF)、P1 trace record JSON 解析添加 try/except 防崩溃、P2 sb_core.py 版本号 3.0.0→3.4.2、P3 test_superbrain.py 自检断言 5→9、P4 aliases 帮助文本添加格式示例。测试保持 211 项，核心功能无变更。 |

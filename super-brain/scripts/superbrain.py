@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-SuperBrain CLI v3.5.0 — Unified entry point for the Super Brain skill.
+SuperBrain CLI v3.6.0 — Unified entry point for the Super Brain skill.
 Provides subcommands for memory, graph, search, selfcheck, workspace, stats,
-skillopt (self-evolution), trace, orchestration, and Obsidian sync management.
+skillopt (self-evolution), trace, orchestration, Obsidian sync, and the
+Global Workspace gating layer (v3.6.0) management.
 
 Usage:
     # Core commands
@@ -104,7 +105,13 @@ from sb_pipeline import (
 )
 from sb_reasoning import (
     extract_key_points, analyze_logic, derive_conclusion, assist_decision,
-    get_reasoning_stats
+    get_reasoning_stats, capture_reasoning_chain
+)
+# v3.6.0 imports — Global Workspace gating layer
+from sb_gating import (
+    get_threshold, set_threshold, compute_salience, is_promoted,
+    chain_ignite, get_active_workspace, promote, demote,
+    calibrate, get_status, DEFAULT_THRESHOLD, DEFAULT_CAP
 )
 from sb_entanglement import (
     mine_entanglement, reinforce_links, build_entanglement_field,
@@ -254,9 +261,71 @@ def cmd_memory_merge(args):
 
 
 def cmd_memory_context(args):
-    """Get context for injection. v2.1.0: supports --min-score."""
-    ctx = get_context(args.query, limit=args.limit, min_score=args.min_score)
+    """Get context for injection. v2.1.0: supports --min-score.
+    v3.6.0: --workspace-only restricts to the global workspace (promoted
+    memories only), mirroring GWT's selective broadcast into the workspace."""
+    ctx = get_context(
+        args.query, limit=args.limit, min_score=args.min_score,
+        workspace=args.workspace,
+        workspace_only=getattr(args, "workspace_only", False)
+    )
     print_json(ctx)
+
+
+# === Global Workspace Gating Layer (v3.6.0) ===
+
+def cmd_gating_status(args):
+    """Show workspace gating status: threshold, cap, promotion ratio."""
+    print_json(get_status(workspace=args.workspace))
+
+
+def cmd_gating_active(args):
+    """List memories currently promoted into the global workspace."""
+    active = get_active_workspace(workspace=args.workspace, cap=args.limit)
+    print_json(active)
+
+
+def cmd_gating_promote(args):
+    """Force-promote a memory into the global workspace (override salience)."""
+    ok = promote(args.id, workspace=args.workspace)
+    if ok:
+        print(f"Promoted {args.id} into the global workspace.")
+    else:
+        print(f"Memory {args.id} not found.")
+        sys.exit(1)
+
+
+def cmd_gating_demote(args):
+    """Force-demote a memory out of the global workspace."""
+    ok = demote(args.id, workspace=args.workspace)
+    if ok:
+        print(f"Demoted {args.id} out of the global workspace.")
+    else:
+        print(f"Memory {args.id} not found.")
+        sys.exit(1)
+
+
+def cmd_gating_threshold(args):
+    """Get or set the promotion salience threshold (0-1)."""
+    if args.value is not None:
+        set_threshold(args.value, workspace=args.workspace)
+        print(f"Threshold set to {args.value} for workspace '{args.workspace or 'default'}'.")
+    else:
+        t = get_threshold(workspace=args.workspace)
+        print(f"Current threshold: {t}")
+
+
+def cmd_gating_calibrate(args):
+    """Report promotion ratio across thresholds to tune selectivity."""
+    print_json(calibrate(workspace=args.workspace, threshold=args.threshold))
+
+
+def cmd_reason_capture(args):
+    """Capture a text's reasoning chain as reasoning_intermediate memories (v3.6.0)."""
+    result = capture_reasoning_chain(
+        args.text, source_id=args.source_id, workspace=args.workspace
+    )
+    print_json(result)
 
 
 def cmd_memory_stats(args):
@@ -1065,6 +1134,9 @@ def build_parser():
     sp.add_argument("query", help="Context query")
     sp.add_argument("--limit", type=int, default=5, help="Max memories in context")
     sp.add_argument("--min-score", type=float, help="Minimum score filter (v2.1.0)")
+    sp.add_argument("--workspace-only", action="store_true",
+                    help="v3.6.0: restrict to global-workspace (promoted) memories only")
+    sp.add_argument("--workspace", help="Workspace name (defaults to current)")
     sp.set_defaults(func=cmd_memory_context)
 
     # memory stats
@@ -1326,6 +1398,47 @@ def build_parser():
     sp.add_argument("--options", help="JSON array of options")
     sp.add_argument("--workspace", help="Workspace name")
     sp.set_defaults(func=cmd_reason_decide)
+
+    sp = reason_sub.add_parser("capture", help="Capture a reasoning chain (v3.6.0)")
+    sp.add_argument("--text", required=True, help="Reasoning text to capture")
+    sp.add_argument("--source-id", help="Optional source memory ID")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_reason_capture)
+
+    # gating — Global Workspace gating layer (v3.6.0)
+    sp_gating = subparsers.add_parser(
+        "gating", help="Global Workspace gating layer (v3.6.0): promote/demote/salience"
+    )
+    gating_sub = sp_gating.add_subparsers(dest="gating_command")
+
+    sp = gating_sub.add_parser("status", help="Show gating status (threshold, cap, ratio)")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_gating_status)
+
+    sp = gating_sub.add_parser("active", help="List promoted (global-workspace) memories")
+    sp.add_argument("--limit", type=int, default=50, help="Max active memories")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_gating_active)
+
+    sp = gating_sub.add_parser("promote", help="Force-promote a memory into the workspace")
+    sp.add_argument("--id", required=True, help="Memory ID")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_gating_promote)
+
+    sp = gating_sub.add_parser("demote", help="Force-demote a memory out of the workspace")
+    sp.add_argument("--id", required=True, help="Memory ID")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_gating_demote)
+
+    sp = gating_sub.add_parser("threshold", help="Get/set promotion salience threshold")
+    sp.add_argument("--value", type=float, help="New threshold in [0, 1]")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_gating_threshold)
+
+    sp = gating_sub.add_parser("calibrate", help="Report promotion ratio across thresholds")
+    sp.add_argument("--threshold", type=float, help="Specific threshold to report")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_gating_calibrate)
 
     # entangle
     sp_entangle = subparsers.add_parser("entangle", help="Entanglement field (v3.0.0)")

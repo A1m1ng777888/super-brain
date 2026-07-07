@@ -507,3 +507,76 @@ def get_reasoning_stats(workspace=None):
         "causal_memories": causal_memories,
         "avg_relationships_per_memory": round(total_relationships / max(len(active), 1), 2)
     }
+
+
+def capture_reasoning_chain(text, source_id=None, workspace=None):
+    """
+    v3.6.0: Persist a text's reasoning chain as `reasoning_intermediate` memories
+    linked by a shared `chain_id` (and bidirectionally via related_nodes).
+
+    This is the "internal reasoning" capture: instead of keeping only the final
+    conclusion, the intermediate concepts that causally drive it become
+    first-class, retrievable memories (mirroring the paper's finding that
+    multi-step reasoning has intermediate concepts that causally drive the answer).
+
+    Returns dict with chain_id, stored count, ids, logic_structure.
+    """
+    if not text or len(text.strip()) < 5:
+        return {"chain_id": None, "stored": 0, "reason": "empty text"}
+
+    points = extract_key_points(text, max_points=5)
+    logic = analyze_logic(text)
+    if not points:
+        return {"chain_id": None, "stored": 0, "reason": "no key points extracted"}
+
+    from sb_core import generate_id, read_memories, write_memories
+    from sb_memory import add_memory
+
+    chain_id = generate_id("chain")
+    mems = []
+    for p in points:
+        m = add_memory(
+            content=p["sentence"],
+            mem_type="reasoning_intermediate",
+            entity="reasoning",
+            confidence=0.6,
+            source="reasoning_capture",
+            attributes={
+                "chain_id": chain_id,
+                "reasoning_role": "intermediate",
+                "source_id": source_id,
+                "point_type": p["type"],
+                "logic_structure": logic.get("structure"),
+            },
+            tags=["reasoning-intermediate"],
+            workspace=workspace,
+        )
+        mems.append(m)
+
+    # Link chain nodes bidirectionally via related_nodes (entanglement signal
+    # feeds salience; the chain is navigable as a unit for chain-ignition).
+    if len(mems) > 1:
+        all_mem = read_memories(workspace)
+        by_id = {m["id"]: m for m in all_mem}
+        for i, m in enumerate(mems):
+            nbrs = []
+            if i > 0:
+                nbrs.append(mems[i - 1]["id"])
+            if i < len(mems) - 1:
+                nbrs.append(mems[i + 1]["id"])
+            cur = by_id.get(m["id"])
+            if cur is not None:
+                existing = list(cur.get("related_nodes") or [])
+                merged = existing + [n for n in nbrs if n not in existing]
+                cur["related_nodes"] = merged
+                # 关键修复：chain_id 必须写到记忆顶层字段，
+                # 否则 chain_ignite 无法据 chain_id 整链点燃。
+                cur["chain_id"] = chain_id
+        write_memories(all_mem, workspace)
+
+    return {
+        "chain_id": chain_id,
+        "stored": len(mems),
+        "ids": [m["id"] for m in mems],
+        "logic_structure": logic.get("structure"),
+    }

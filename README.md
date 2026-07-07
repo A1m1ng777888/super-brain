@@ -1,13 +1,21 @@
 # Super Brain (超脑) — AI Agent 认知增强系统
 
-[![Version](https://img.shields.io/badge/version-3.2.2-blue)](https://github.com/A1m1ng777888/super-brain)
+[![Version](https://img.shields.io/badge/version-3.6.0-blue)](https://github.com/A1m1ng777888/super-brain)
 [![Python](https://img.shields.io/badge/python-3.8+-green)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-76%20PASS-brightgreen)](super-brain/scripts/test_v3.py)
+[![Tests](https://img.shields.io/badge/tests-74%20PASS-brightgreen)](super-brain/scripts/test_superbrain.py)
 [![Architecture](https://img.shields.io/badge/architecture-5%E5%B1%8417%E6%A8%A1%E5%9D%97-orange)](super-brain/references/architecture.md)
 
 为 AI Agent 提供**持久记忆、知识图谱、语义搜索、自动推理、关联挖掘、对话即入库、分类管线、感知增强、子Agent编排**九大核心能力，构建从感知到执行编排的完整认知增强闭环。
 
+> **v3.6.0**：全局工作空间门控层（Global Workspace Gating）— 受 Anthropic《A Global Workspace in Language Models》(2026-07-06) 启发，记忆分冷存储与活跃工作空间两层，按显著度晋升、容量上限约束、链式点燃实现 Ignition；新增 `reasoning_intermediate` 类型与 `reason capture` 中间推理捕获；新增 `gating` 子命令与 `memory context --workspace-only`。25 项新测试 + 49 项回归全通过。
+>
+> **v3.5.0**：Token ROI 仪表盘全面升级（30天趋势图 + 负 ROI 诊断 + 交互式 HTML 看板）。
+>
+> **v3.4.x**：P0 数据安全修复（read_memories 文件损坏自动备份防丢失）。
+>
+> **v3.3.0**：Goal Continuation 续跑机制。
+>
 > **v3.2.2**：前置编配评估提升至 SOUL.md 始终在线 — Agent 收到任何任务时自主判断是否需要子Agent编配，不需用户说"拆"。
 >
 > **v3.2.0**：子Agent编排器 — 4维度复杂度评估 + 任务分解 + 6套工具画像 + 预算熔断 + 失败隔离。

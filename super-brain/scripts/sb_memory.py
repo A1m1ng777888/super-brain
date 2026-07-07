@@ -28,7 +28,7 @@ from sb_search import (
 
 
 # Memory types
-MEMORY_TYPES = ["fact", "preference", "event", "relationship", "task", "decision", "context"]
+MEMORY_TYPES = ["fact", "preference", "event", "relationship", "task", "decision", "context", "reasoning_intermediate"]
 
 # Default attributes for each type
 TYPE_DEFAULTS = {
@@ -38,7 +38,8 @@ TYPE_DEFAULTS = {
     "relationship": {"scope": "global", "category": "social"},
     "task": {"scope": "workspace", "category": "work"},
     "decision": {"scope": "workspace", "category": "work"},
-    "context": {"scope": "session", "category": "background"}
+    "context": {"scope": "session", "category": "background"},
+    "reasoning_intermediate": {"scope": "session", "category": "reasoning"}
 }
 
 
@@ -133,7 +134,11 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
         "valid_from": valid_from,
         "valid_until": valid_until,
         "replaces": replaces,
-        "replaced_by": None
+        "replaced_by": None,
+        "salience": float(confidence),
+        "chain_id": None,
+        "reasoning_role": None,
+        "workspace_promoted": False
     }
 
     # --- Temporal: update replaced_by on old memory (v2.1.0) ---
@@ -339,11 +344,13 @@ def search(query, limit=10, workspace=None):
     return scored_results[:limit]
 
 
-def get_context(query, limit=5, workspace=None, min_score=None):
+def get_context(query, limit=5, workspace=None, min_score=None, workspace_only=False):
     """
     Get relevant context for a query.
     v2.1.0: supports min_score for dynamic threshold override;
     includes valid_from/valid_until in output for temporal awareness.
+    v3.6.0: workspace_only restricts results to memories currently promoted
+    into the global workspace (GWT selective broadcast analog).
     Returns a compressed summary suitable for injection into conversation context.
     Uses Token optimization: structured format instead of full memory dumps.
     """
@@ -355,6 +362,9 @@ def get_context(query, limit=5, workspace=None, min_score=None):
     for mem, score, match_type in results:
         # v2.1.0: apply min_score filter if provided
         if min_score is not None and score < min_score:
+            continue
+        # v3.6.0: GWT gate — only surface memories broadcast into the workspace
+        if workspace_only and not mem.get("workspace_promoted", False):
             continue
         entry = {
             "id": mem["id"],
@@ -373,6 +383,9 @@ def get_context(query, limit=5, workspace=None, min_score=None):
             entry["valid_until"] = mem["valid_until"]
         if mem.get("replaces"):
             entry["replaces"] = mem["replaces"]
+        # v3.6.0: surface workspace promotion so --workspace-only results
+        # are transparent and verifiable by the caller
+        entry["workspace_promoted"] = mem.get("workspace_promoted", False)
         context_memories.append(entry)
         if len(context_memories) >= limit:
             break
