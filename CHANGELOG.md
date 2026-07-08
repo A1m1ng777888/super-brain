@@ -1,5 +1,45 @@
 # Changelog — Super Brain 超脑
 
+## v3.7.0 (2026-07-08)
+
+### Karpathy 认知 OS 五条蒸馏全落地
+
+Karpathy 6 心智模型 + 8 决策启发式 → 超脑 5 条固件升级。
+
+### 新增 — 尾部可靠性门控（B）
+自检 9→12 项，新增 3 个门控极端场景自检项：
+- `check_gating_salience_bounds` — 验证所有 salience 在 [0,1] 区间
+- `check_gating_demote_integrity` — 验证手动 demote 真正生效
+- `check_gating_flood_protection` — 验证工作空间不溢出容量上限
+
+### 新增 — 幽灵标注（A）
+- `sb_memory.py` 新增 `PROVENANCE_LABELS` + `compute_provenance()`
+- `add_memory` 入库即标 provenance 字段（verified/inferred/reasoning_step/unknown）
+- `get_context` 输出带来源标签（✅已验证/🧠推断/🔗推理步骤/❓未标注）
+
+### 新增 — 套装固化（E）
+- `sb_gating.py` 新增 `_audit_log()` / `rollback()` / `explain()` + `audit_log.json`
+- 所有 auto/manual promote/demote/chain_ignite 写入审计日志（保留 500 条）
+- 新增 `gating audit/rollback/explain` CLI
+
+### 新增 — 构建即理解校验（D）
+- `sb_longterm.py` 新增 `comprehension_check()`
+- ingest 管线入库前做独立复述校验（三进制哈希 Jaccard 对比）
+- 未通过 → 降置信度 + 标 "needs_review" / "needs_verification"
+
+### 新增 — 能力感知路由（C）
+- 新建 `sb_capability.py`（8 项能力画像 + 能力检查 + 编排器集成）
+- `sb_orchestrator.assess_complexity` 返回 `capability_warnings`
+- 新增 `capability list/check/update` CLI
+
+### 修复
+- `sb_selfcheck.get_health_score` 重复循环 bug（逻辑检查执行了两次）
+- `sb_gating.py` 新增 `import uuid`（审计日志依赖）
+
+### 测试
+- 49/49 回归测试全通过
+- test_superbrain.py 断言 9→12 项已更新
+
 ## v3.6.1 (2026-07-08)
 
 ### 变更：门控层自动接线（GWT 选择性原则落地 ingest 主干）
