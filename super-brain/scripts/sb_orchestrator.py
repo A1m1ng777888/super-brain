@@ -207,6 +207,20 @@ def assess_complexity(task_description, current_context_size=0, workspace=None):
     if token_score > 0.5:
         reasoning_parts.append(f"预估 {estimated_tokens} tokens，可能撑爆上下文窗口")
 
+    # v3.7: 能力感知路由 — 检查任务是否落在超脑的锯齿凹陷点上
+    capability_warnings = []
+    try:
+        from sb_capability import assess_task_capabilities
+        cap_result = assess_task_capabilities(description, workspace)
+        capability_warnings = cap_result.get("warnings", [])
+        if capability_warnings:
+            weak_caps = [w["capability"] for w in capability_warnings]
+            reasoning_parts.append(f"⚠️ 能力凹陷点: {', '.join(weak_caps)}")
+            if cap_result.get("has_critical_warnings"):
+                reasoning_parts.append("存在严重能力不足，建议显式求助用户")
+    except Exception:
+        pass  # 能力检查失败不阻塞评估
+
     return {
         "score": round(composite, 3),
         "recommend": composite >= ORCHESTRATE_THRESHOLD,
@@ -214,7 +228,9 @@ def assess_complexity(task_description, current_context_size=0, workspace=None):
         "dimensions": dimensions,
         "reasoning": "；".join(reasoning_parts) if reasoning_parts else "任务简单，单Agent可处理",
         "estimated_tokens": estimated_tokens,
-        "needed_profiles": needed_profiles
+        "needed_profiles": needed_profiles,
+        # v3.7: capability-aware routing
+        "capability_warnings": capability_warnings
     }
 
 

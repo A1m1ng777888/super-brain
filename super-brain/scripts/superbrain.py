@@ -320,6 +320,62 @@ def cmd_gating_calibrate(args):
     print_json(calibrate(workspace=args.workspace, threshold=args.threshold))
 
 
+def cmd_gating_audit(args):
+    """v3.7: View recent gating audit trail entries."""
+    from sb_gating import get_audit_log
+    limit = int(getattr(args, 'limit', 20))
+    result = get_audit_log(limit=limit, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_gating_rollback(args):
+    """v3.7: Rollback the last N reversible auto-actions."""
+    from sb_gating import rollback
+    n = int(getattr(args, 'n', 1))
+    result = rollback(n=n, workspace=args.workspace)
+    print(f"Rolled back {result['rolled_back']} action(s).")
+    if result['ids']:
+        print("IDs:", ", ".join(result['ids']))
+
+
+def cmd_gating_explain(args):
+    """v3.7: Explain why a memory is in its current gating state."""
+    from sb_gating import explain
+    result = explain(args.mem_id, workspace=args.workspace)
+    print_json(result)
+
+
+def cmd_capability_list(args):
+    """v3.7: List all capability profiles."""
+    from sb_capability import list_capabilities
+    print_json(list_capabilities(workspace=args.workspace))
+
+
+def cmd_capability_check(args):
+    """v3.7: Check a single capability."""
+    from sb_capability import check_capability
+    score, strategy, ask = check_capability(args.cap_id, workspace=args.workspace)
+    print_json({
+        "cap_id": args.cap_id,
+        "score": score,
+        "degradation_strategy": strategy,
+        "should_ask_user": ask
+    })
+
+
+def cmd_capability_update(args):
+    """v3.7: Update a capability profile."""
+    from sb_capability import update_capability
+    ask_user = None
+    if args.ask_user is not None:
+        ask_user = args.ask_user.lower() == "true"
+    result = update_capability(
+        args.cap_id, score=args.score, evidence=args.evidence,
+        strategy=args.strategy, ask_user=ask_user, workspace=args.workspace
+    )
+    print_json(result)
+
+
 def cmd_reason_capture(args):
     """Capture a text's reasoning chain as reasoning_intermediate memories (v3.6.0)."""
     result = capture_reasoning_chain(
@@ -1439,6 +1495,43 @@ def build_parser():
     sp.add_argument("--threshold", type=float, help="Specific threshold to report")
     sp.add_argument("--workspace", help="Workspace name")
     sp.set_defaults(func=cmd_gating_calibrate)
+
+    sp = gating_sub.add_parser("audit", help="v3.7: View recent gating audit trail")
+    sp.add_argument("--limit", type=int, default=20, help="Max entries")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_gating_audit)
+
+    sp = gating_sub.add_parser("rollback", help="v3.7: Rollback last N reversible auto-actions")
+    sp.add_argument("--n", type=int, default=1, help="Number of actions to roll back")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_gating_rollback)
+
+    sp = gating_sub.add_parser("explain", help="v3.7: Explain a memory's gating state")
+    sp.add_argument("--mem-id", required=True, dest="mem_id", help="Memory ID")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_gating_explain)
+
+    # capability — v3.7: Capability-aware router (Karpathy 锯齿状智能)
+    sp_cap = subparsers.add_parser("capability", help="Capability-aware router (v3.7)")
+    cap_sub = sp_cap.add_subparsers(dest="cap_command")
+
+    sp = cap_sub.add_parser("list", help="List all known capabilities with scores")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_capability_list)
+
+    sp = cap_sub.add_parser("check", help="Check a single capability's reliability")
+    sp.add_argument("cap_id", help="Capability ID")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_capability_check)
+
+    sp = cap_sub.add_parser("update", help="Update a capability's score or metadata")
+    sp.add_argument("cap_id", help="Capability ID")
+    sp.add_argument("--score", type=float, help="New reliability score 0-1")
+    sp.add_argument("--evidence", help="Updated evidence description")
+    sp.add_argument("--strategy", help="New degradation strategy")
+    sp.add_argument("--ask-user", dest="ask_user", choices=["true", "false"], help="Whether to ask user")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_capability_update)
 
     # entangle
     sp_entangle = subparsers.add_parser("entangle", help="Entanglement field (v3.0.0)")

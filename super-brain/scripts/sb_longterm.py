@@ -40,6 +40,65 @@ from sb_perception import should_learn_or_query, information_value_assessment
 from sb_pipeline import classify_content, CATEGORY_DEFINITION, CATEGORY_CHITCHAT
 
 
+# v3.7: comprehension check — Karpathy "构建即理解" 落地
+# 新概念入库前，独立复述原文关键点并与提取结果对比；
+# 相似度不够 → 降低 confidence 并标记 "needs_review" 或 "needs_verification"
+
+COMPREHENSION_PASS = 0.7        # 相似度 ≥ 此值 = 理解通过
+COMPREHENSION_PARTIAL = 0.4     # 相似度 ≥ 此值 = 部分理解
+# 相似度 < COMPREHENSION_PARTIAL = 理解失败
+
+
+def comprehension_check(original_text, extracted_content, workspace=None):
+    """
+    验证系统是否真正理解了待入库内容。
+
+    策略：
+    1. 对原文独立做关键点提取（不参考已提取结果）
+    2. 用三进制哈希 Jaccard 对比两次提取的相似度
+    3. 根据相似度返回 (passed, adjusted_confidence, similarity, review_flag)
+
+    review_flag:
+      - None      → 理解通过
+      - needs_review → 部分理解，置信度打 8 折
+      - needs_verification → 理解失败，置信度打 5 折
+    """
+    # 过短文本跳过校验（1-2 个词不需要"理解"）
+    if len(original_text.strip()) < 15:
+        return (True, 1.0, 1.0, None)
+
+    try:
+        from sb_reasoning import extract_key_points
+        independent = extract_key_points(original_text, max_points=3)
+        independent_text = " ".join(
+            p["sentence"] if isinstance(p, dict) else str(p)
+            for p in independent
+        )
+    except Exception:
+        # 提取失败 → 保守标记
+        return (False, 0.4, 0.0, "needs_verification")
+
+    if not independent_text.strip():
+        return (False, 0.4, 0.0, "needs_verification")
+
+    # 相似度对比（三进制哈希 Jaccard）
+    try:
+        h1 = ternary_hash(extracted_content)
+        h2 = ternary_hash(independent_text)
+        sim = ternary_similarity(h1, h2)
+        # ternary_similarity returns a value; clamp if needed
+        sim = max(0.0, min(1.0, sim))
+    except Exception:
+        sim = 0.5   # 保守中性
+
+    if sim >= COMPREHENSION_PASS:
+        return (True, 1.0, sim, None)
+    elif sim >= COMPREHENSION_PARTIAL:
+        return (False, 0.8, sim, "needs_review")
+    else:
+        return (False, 0.5, sim, "needs_verification")
+
+
 def auto_ingest(text, source_session=None, workspace=None):
     """
     "对话即入库" — Automatically extract and store knowledge from text.
@@ -82,11 +141,27 @@ def auto_ingest(text, source_session=None, workspace=None):
     from sb_reasoning import extract_key_points
     key_points = extract_key_points(text, max_points=3)
     
+    # v3.7: comprehension check — 入库前验证是否真理解了
+    comprehension_result = None
+    if key_points:
+        combined_extracted = " ".join(
+            p["sentence"] if isinstance(p, dict) else str(p)
+            for p in key_points
+        )
+        comprehension_result = comprehension_check(text, combined_extracted, workspace)
+    else:
+        comprehension_result = comprehension_check(text, text[:500], workspace)
+    
     # Step 3: Classify content
     classification = classify_content(text)
     
     # Step 4: Store
     stored = []
+
+    # v3.7: 根据 comprehension check 结果调整置信度
+    adj_mult, review_flag = 1.0, None
+    if comprehension_result:
+        _, adj_mult, comp_sim, review_flag = comprehension_result
     
     # If there are clear key points, store each as a memory
     if key_points:
@@ -96,19 +171,27 @@ def auto_ingest(text, source_session=None, workspace=None):
             if point_perception["decision"] == "skip":
                 continue
             
+            # v3.7: apply comprehension adjustment
+            adjusted_confidence = min(0.95, perception["value"] + 0.1) * adj_mult
+            
+            attrs = {
+                "content_category": classification["category"],
+                "perception_decision": decision,
+                "perception_value": perception["value"],
+                "point_type": point["type"],
+                "auto_ingested": True
+            }
+            if review_flag:
+                attrs["comprehension_review"] = review_flag
+                attrs["comprehension_similarity"] = comp_sim
+            
             memory = add_memory(
                 content=point["sentence"],
                 mem_type=_infer_memory_type(point["type"], classification["category"]),
                 entity=_extract_entity(text, point["sentence"]),
-                confidence=min(0.95, perception["value"] + 0.1),
+                confidence=adjusted_confidence,
                 source=source_session or "auto_ingest",
-                attributes={
-                    "content_category": classification["category"],
-                    "perception_decision": decision,
-                    "perception_value": perception["value"],
-                    "point_type": point["type"],
-                    "auto_ingested": True
-                },
+                attributes=attrs,
                 workspace=workspace
             )
             stored.append({

@@ -26,7 +26,7 @@ from sb_search import (
     tokenize
 )
 # v3.6.1: 接入 GWT 门控层（冷存储/活跃工作空间两层）。sb_gating 仅依赖 sb_core，无反向 import，单向安全。
-from sb_gating import compute_salience, is_promoted
+from sb_gating import compute_salience, is_promoted, _audit_log
 
 
 # Memory types
@@ -43,6 +43,43 @@ TYPE_DEFAULTS = {
     "context": {"scope": "session", "category": "background"},
     "reasoning_intermediate": {"scope": "session", "category": "reasoning"}
 }
+
+# v3.7: provenance labels — Karpathy "召唤的幽灵" 落地
+# 在 get_context 输出中标注每条记忆的可信度来源
+PROVENANCE_LABELS = {
+    "verified": "✅已验证",
+    "inferred": "🧠推断",
+    "reasoning_step": "🔗推理步骤",
+    "unknown": "❓未标注"
+}
+
+
+def compute_provenance(mem):
+    """
+    v3.7: 根据 confidence + type 自动判定记忆的来源可信度等级。
+    Karpathy LLM=召唤的幽灵 → 诚实标注而非伪装事实。
+
+    返回 (provenance, provenance_source, confidence_adjustment)
+    - provenance: verified / inferred / reasoning_step / unknown
+    - provenance_source: user_statement / system_inference / reasoning_capture / auto_ingest
+    - confidence_adjustment: multiplier for original confidence (仅在 downgrade 时有效)
+    """
+    mem_type = mem.get("type", "fact")
+
+    # reasoning_intermediate 始终标为推理步骤——它可能是幽灵
+    if mem_type == "reasoning_intermediate":
+        return ("reasoning_step", "reasoning_capture", 1.0)
+
+    conf = float(mem.get("confidence", 0.5))
+
+    if conf >= 0.9:
+        return ("verified", "user_statement", 1.0)       # 用户直述，不需要调整
+    elif conf >= 0.7:
+        return ("inferred", "system_inference", 1.0)      # 强推断，保持原置信度
+    elif conf >= 0.5:
+        return ("inferred", "auto_ingest", 1.0)           # 自动入库，保持
+    else:
+        return ("unknown", "system_inference", 1.0)       # 低置信度，不调整数字但标来源
 
 
 def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
@@ -157,8 +194,25 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
     memory["salience"] = compute_salience(memory, workspace)
     memory["workspace_promoted"] = is_promoted(memory, workspace)
 
+    # v3.7: provenance 自动标注 — 诚实区分验证过 vs 推断 vs 推理步骤
+    provenance, provenance_source, _ = compute_provenance(memory)
+    memory["provenance"] = provenance
+    memory["provenance_source"] = provenance_source
+
     memories.append(memory)
     write_memories(memories, workspace)
+
+    # v3.7: audit trail — 记录自动入库+自动晋升
+    if memory.get("workspace_promoted"):
+        _audit_log("auto_promote", new_id,
+                   f"Auto-promoted via ingest (salience={memory.get('salience', '?')})",
+                   {"workspace_promoted": False}, {"workspace_promoted": True},
+                   reversible=True, workspace=workspace)
+    else:
+        _audit_log("auto_ingest", new_id,
+                   f"Auto-ingested (salience={memory.get('salience', '?')} < threshold)",
+                   {}, {"workspace_promoted": False},
+                   reversible=False, workspace=workspace)
 
     return memory
 
@@ -395,6 +449,10 @@ def get_context(query, limit=5, workspace=None, min_score=None, workspace_only=F
         # v3.6.0: surface workspace promotion so --workspace-only results
         # are transparent and verifiable by the caller
         entry["workspace_promoted"] = mem.get("workspace_promoted", False)
+        # v3.7: provenance label — 诚实标注可信度来源（避免把幽灵当事实）
+        provenance = mem.get("provenance", "unknown")
+        entry["provenance"] = provenance
+        entry["provenance_label"] = PROVENANCE_LABELS.get(provenance, "❓未标注")
         context_memories.append(entry)
         if len(context_memories) >= limit:
             break

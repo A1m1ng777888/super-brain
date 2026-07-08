@@ -28,12 +28,14 @@ Author: A1m1ng777888
 
 import sys
 import os
+import uuid
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sb_core import (
-    read_memories, write_memories, read_meta, update_meta, get_timestamp
+    read_memories, write_memories, read_meta, update_meta, get_timestamp,
+    read_json, write_json, get_workspace_dir, generate_id
 )
 
 # --- Defaults -------------------------------------------------------------
@@ -166,8 +168,14 @@ def chain_ignite(workspace=None):
     for m in active:
         cid = m.get("chain_id")
         if cid in chain_promoted and not m.get("workspace_promoted", False):
+            before = {"workspace_promoted": False}
             m["workspace_promoted"] = True
+            after = {"workspace_promoted": True}
             changed += 1
+            # v3.7: audit trail — chain ignite is reversible
+            _audit_log("chain_ignite", m["id"],
+                       f"Chain ignited via chain_id={cid}",
+                       before, after, reversible=True, workspace=workspace)
 
     if changed:
         write_memories(memories, workspace)
@@ -223,10 +231,16 @@ def promote(mem_id, workspace=None):
     memories = read_memories(workspace)
     for m in memories:
         if m["id"] == mem_id and m.get("status") == "active":
+            before = {"workspace_promoted": m.get("workspace_promoted", False)}
             m["gating_override"] = "promote"
             m["workspace_promoted"] = True
             m["salience"] = max(m.get("salience", 0.0), get_threshold(workspace))
+            after = {"workspace_promoted": True, "gating_override": "promote"}
             write_memories(memories, workspace)
+            # v3.7: audit trail
+            _audit_log("manual_promote", mem_id,
+                       f"Manual promote override (salience >= {get_threshold(workspace)})",
+                       before, after, reversible=False, workspace=workspace)
             return {"id": mem_id, "promoted": True}
     return {"id": mem_id, "promoted": False, "reason": "not found or inactive"}
 
@@ -236,11 +250,161 @@ def demote(mem_id, workspace=None):
     memories = read_memories(workspace)
     for m in memories:
         if m["id"] == mem_id:
+            before = {"workspace_promoted": m.get("workspace_promoted", False)}
             m["gating_override"] = "demote"
             m["workspace_promoted"] = False
+            after = {"workspace_promoted": False, "gating_override": "demote"}
             write_memories(memories, workspace)
+            # v3.7: audit trail
+            _audit_log("manual_demote", mem_id,
+                       "Manual demote override",
+                       before, after, reversible=False, workspace=workspace)
             return {"id": mem_id, "demoted": True}
     return {"id": mem_id, "demoted": False, "reason": "not found"}
+
+
+# --- v3.7: Audit Log & Rollback (Karpathy Iron Man 套装固化) -----------------
+_MAX_AUDIT_ENTRIES = 500
+
+
+def _audit_log(action, target_id, reason, before, after, reversible=True, workspace=None):
+    """
+    Record a gating action to the audit trail.
+    All auto/manual promote/demote/chain_ignite flow through here.
+    """
+    ws_dir = get_workspace_dir(workspace)
+    log_path = os.path.join(ws_dir, "audit_log.json")
+    log = read_json(log_path) or {"entries": []}
+
+    entry = {
+        "id": f"audit_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}",
+        "timestamp": get_timestamp(),
+        "action": action,
+        "target_id": target_id,
+        "target_type": "memory",
+        "reason": reason,
+        "before_state": before,
+        "after_state": after,
+        "reversible": reversible,
+        "reverted": False
+    }
+    log["entries"].append(entry)
+
+    # Trim to max entries
+    if len(log["entries"]) > _MAX_AUDIT_ENTRIES:
+        log["entries"] = log["entries"][-_MAX_AUDIT_ENTRIES:]
+
+    write_json(log_path, log)
+    return entry
+
+
+def _get_audit_entries_for(mem_id, workspace=None):
+    """Retrieve all audit entries for a specific memory."""
+    ws_dir = get_workspace_dir(workspace)
+    log_path = os.path.join(ws_dir, "audit_log.json")
+    log = read_json(log_path)
+    if not log:
+        return []
+    return [e for e in log.get("entries", []) if e.get("target_id") == mem_id]
+
+
+def get_audit_log(limit=20, workspace=None):
+    """Retrieve recent audit entries."""
+    ws_dir = get_workspace_dir(workspace)
+    log_path = os.path.join(ws_dir, "audit_log.json")
+    log = read_json(log_path)
+    if not log:
+        return {"entries": [], "total": 0}
+    entries = log.get("entries", [])
+    return {"entries": entries[-limit:], "total": len(entries)}
+
+
+def rollback(n=1, workspace=None):
+    """
+    Rollback the last N reversible auto-actions.
+    Manual overrides (manual_promote/manual_demote) are not auto-rolled back.
+    Returns list of rolled-back entry IDs.
+    """
+    ws_dir = get_workspace_dir(workspace)
+    log_path = os.path.join(ws_dir, "audit_log.json")
+    log = read_json(log_path)
+    if not log:
+        return {"rolled_back": 0, "ids": []}
+
+    rolled_back = []
+    count = 0
+    memories = read_memories(workspace)
+
+    for entry in reversed(log["entries"]):
+        if count >= n:
+            break
+        if not entry.get("reversible", False):
+            continue
+        if entry.get("reverted", False):
+            continue
+        # Only auto-rollback non-manual actions
+        if entry["action"].startswith("manual_"):
+            continue
+
+        target_id = entry["target_id"]
+        before = entry.get("before_state", {})
+
+        # Restore before_state
+        for m in memories:
+            if m["id"] == target_id:
+                for key, val in before.items():
+                    if key in ("workspace_promoted", "gating_override", "salience"):
+                        m[key] = val
+                break
+
+        entry["reverted"] = True
+        rolled_back.append(entry["id"])
+        count += 1
+
+    if rolled_back:
+        write_memories(memories, workspace)
+        write_json(log_path, log)
+
+    return {"rolled_back": len(rolled_back), "ids": rolled_back}
+
+
+def explain(mem_id, workspace=None):
+    """
+    Return a human-readable explanation of a memory's gating state:
+    current salience, why promoted/demoted, full audit trail.
+    """
+    memories = read_memories(workspace)
+    mem = next((m for m in memories if m["id"] == mem_id), None)
+
+    if not mem:
+        return {"memory_id": mem_id, "found": False, "reason": "memory not found"}
+
+    audit = _get_audit_entries_for(mem_id, workspace)
+
+    # Build salience breakdown
+    mem_type = mem.get("type", "fact")
+    confidence = float(mem.get("confidence", 0.5))
+    access = int(mem.get("access_count", 0))
+    entanglement = len(mem.get("related_nodes", []) or [])
+    recency_days = _days_since(mem.get("last_accessed") or mem.get("timestamp"))
+
+    return {
+        "memory_id": mem_id,
+        "found": True,
+        "current_salience": mem.get("salience"),
+        "current_promoted": mem.get("workspace_promoted", False),
+        "gating_override": mem.get("gating_override"),
+        "provenance": mem.get("provenance", "unknown"),
+        "salience_breakdown": {
+            "confidence": confidence,
+            "recency_days": round(recency_days, 1),
+            "access_count": access,
+            "entanglement": entanglement,
+            "type": mem_type,
+            "type_baseline": TYPE_BASELINE.get(mem_type, 0.0)
+        },
+        "audit_trail": audit
+    }
 
 
 # --- Diagnostics ----------------------------------------------------------

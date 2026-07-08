@@ -9,6 +9,7 @@ Author: A1m1ng777888
 
 import json
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -21,7 +22,7 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 
 # Default config
 DEFAULT_CONFIG = {
-    "version": "3.5.0",
+    "version": "3.7.0",
     "data_dir": DEFAULT_DATA_DIR,
     "current_workspace": "default",
     "simhash_bits": 64,

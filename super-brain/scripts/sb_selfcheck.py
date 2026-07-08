@@ -441,9 +441,111 @@ def check_duplicates(workspace=None):
     }
 
 
+# ===== v3.7: 尾部可靠性 — 门控层极端场景自检（Karpathy March of Nines 落地）=====
+
+def check_gating_salience_bounds(workspace=None):
+    """
+    v3.7: 验证所有活跃记忆的 salience 在 [0, 1] 合法区间内。
+    门控层的最基础不变量——任何越界都表示 compute_salience 有 bug。
+    """
+    memories = read_memories(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+    out_of_bounds = []
+    missing_salience = []
+
+    for m in active:
+        s = m.get("salience")
+        if s is None:
+            missing_salience.append(m["id"])
+        elif not (0.0 <= float(s) <= 1.0):
+            out_of_bounds.append({"id": m["id"], "salience": s})
+
+    issues = len(out_of_bounds) + len(missing_salience)
+    return {
+        "check": "gating_salience_bounds",
+        "status": "critical" if issues > 0 else "healthy",
+        "issues_found": issues,
+        "details": {
+            "out_of_bounds": out_of_bounds[:20],
+            "missing_salience": missing_salience[:20],
+            "total_active": len(active)
+        },
+        "recommendation": (
+            "存在 salience 越界或缺失——门控层严重 bug。"
+            "检查 compute_salience() 逻辑与 gating_override 回退路径。"
+        ) if issues else "所有 salience 在 [0,1] 合法区间内。"
+    }
+
+
+def check_gating_demote_integrity(workspace=None):
+    """
+    v3.7: 验证手动 demote 的记忆确实不在活跃工作空间中。
+    防止 v3.6.0 demote 失效 bug 再次静默发生。
+    """
+    memories = read_memories(workspace)
+    demoted_but_promoted = []
+    for m in memories:
+        if (m.get("gating_override") == "demote"
+                and m.get("workspace_promoted", False)):
+            demoted_but_promoted.append({
+                "id": m["id"],
+                "override": m["gating_override"],
+                "promoted": m["workspace_promoted"],
+                "salience": m.get("salience", "?")
+            })
+
+    return {
+        "check": "gating_demote_integrity",
+        "status": "critical" if demoted_but_promoted else "healthy",
+        "issues_found": len(demoted_but_promoted),
+        "details": demoted_but_promoted[:20],
+        "recommendation": (
+            "存在被 demote 但仍处于 promoted 的记忆——这是 v3.6.0 demote 失效 bug 的同类问题。"
+            "检查 get_active_workspace() 是否优先读取 gating_override。"
+        ) if demoted_but_promoted else "所有手动 demote 正确生效。"
+    }
+
+
+def check_gating_flood_protection(workspace=None):
+    """
+    v3.7: 验证活跃工作空间大小在容量限制内 + 晋升比例正常。
+    链式点燃或批量入库bug可能导致 workspace 远超 cap 或晋升比例异常。
+    """
+    memories = read_memories(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+    promoted = [m for m in active if m.get("workspace_promoted", False)]
+    ratio = len(promoted) / max(len(active), 1)
+
+    from sb_gating import DEFAULT_CAP
+    over_cap = len(promoted) > DEFAULT_CAP
+
+    has_issue = over_cap or ratio > 0.40
+    status = "critical" if over_cap else ("warning" if ratio > 0.40 else "healthy")
+
+    return {
+        "check": "gating_flood_protection",
+        "status": status,
+        "issues_found": 1 if has_issue else 0,
+        "details": {
+            "promoted_count": len(promoted),
+            "active_count": len(active),
+            "promotion_ratio": round(ratio, 3),
+            "cap": DEFAULT_CAP,
+            "over_cap": over_cap
+        },
+        "recommendation": (
+            f"工作空间溢出（{len(promoted)}>{DEFAULT_CAP}）——链式点燃或阈值失效。"
+            f"检查 chain_ignite 逻辑和 gating threshold。"
+        ) if over_cap else (
+            f"晋升比例 {ratio:.1%} 异常偏高——批量入库可能未经过门控。"
+            f"检查 add_memory 中 compute_salience 接线。"
+        ) if ratio > 0.40 else "工作空间在容量限制内，晋升比例正常。"
+    }
+
+
 def run_full_check(workspace=None, auto_fix=False):
     """
-    Run all self-check diagnostics (v3.4.0: 9项 = 3物理 + 6逻辑).
+    Run all self-check diagnostics (v3.7: 12项 = 3物理 + 6逻辑 + 3尾部可靠性).
     If auto_fix=True, backup first, then resolve safe issues.
     """
     results = {
@@ -468,7 +570,11 @@ def run_full_check(workspace=None, auto_fix=False):
         check_temporal_validity(workspace),
         check_completeness(workspace),
         check_orphans(workspace),
-        check_duplicates(workspace)
+        check_duplicates(workspace),
+        # v3.7: 尾部可靠性 — 门控层极端场景
+        check_gating_salience_bounds(workspace),
+        check_gating_demote_integrity(workspace),
+        check_gating_flood_protection(workspace)
     ]
 
     for check in checks:
@@ -558,7 +664,7 @@ def get_health_score(workspace=None):
         if age > 90: score -= 15
         elif age > 30: score -= 5
 
-    # Logical checks
+    # Logical checks (v2.1)
     for check_name, check in checks.items():
         issues = check.get("issues_found", 0)
         if check_name == "duplicates":
@@ -573,19 +679,18 @@ def get_health_score(workspace=None):
             score -= min(10, issues * 2)
         elif check_name == "orphans":
             score -= min(10, issues * 2)
-    for check_name, check in checks.items():
-        issues = check.get("issues_found", 0)
-        if check_name == "duplicates":
-            score -= min(20, issues * 5)
-        elif check_name == "consistency":
-            score -= min(25, issues * 8)
-        elif check_name == "timeliness":
-            score -= min(15, issues * 3)
-        elif check_name == "completeness":
-            score -= min(15, issues * 3)
-        elif check_name == "temporal_validity":
-            score -= min(10, issues * 2)
-        elif check_name == "orphans":
-            score -= min(10, issues * 2)
+
+    # v3.7: Tail reliability checks (critical failures cost more)
+    for chk in ["gating_salience_bounds", "gating_demote_integrity", "gating_flood_protection"]:
+        if chk in checks:
+            c = checks[chk]
+            issues = c.get("issues_found", 0)
+            status = c.get("status", "healthy")
+            if chk == "gating_salience_bounds":
+                score -= min(30, issues * 15)
+            elif chk == "gating_demote_integrity":
+                score -= min(40, issues * 20)
+            elif chk == "gating_flood_protection":
+                score -= min(25, 25) if status == "critical" else (min(10, 10) if status == "warning" else 0)
 
     return max(0, score)
