@@ -1,5 +1,32 @@
 # Changelog — Super Brain 超脑
 
+## v3.7.2 (2026-07-09)
+
+### Obsidian 本地知识库升级（Phase B：格式 / 安全 / 可视化）
+
+基于 10 个 Obsidian 相关技能的调研（Phase A），对 `sb_obsidian.py` 做三块升级：
+
+- **① 格式底座对齐（obsidian-markdown）**
+  - 元数据从 `> **类型**:` 纯文本改为 Obsidian callout 块（`> [!note]`/`[!info]`/`[!tip]`/`[!warning]`/`[!todo]`/`[!question]`/`[!quote]`，按记忆类型分色）
+  - 正文加 block reference `^sb-content`，为 Bases / 跨文件引用打底
+  - `[[wikilink]]` 双向链接保留；导出全面符合 Obsidian 风味 Markdown
+- **② 安全护栏（Vote 式安全文件 API）**
+  - 新增 `safe_write_file(filepath, content, vault_root)` + `SafeWriteError`
+  - 路径沙箱（仅限 `超脑记忆/` 导出目录）、拒绝 `..` 遍历、禁止写入 `.obsidian` 系统目录
+  - 仅用 `open()` 直写（不调 shell），结构化异常不泄露系统路径
+  - 替换 `export_to_obsidian` / `_INDEX.md` / `export_memory_as_card` 全部裸写
+- **③ 图谱可视化（json-canvas）**
+  - 新增 `export_graph_as_canvas(workspace, vault_path)`：读 `graph.json` → 生成 `超脑记忆/知识图谱.canvas`
+  - 初版：节点 = 记忆（`file` 节点链对应 `.md`）/ 实体（`text` 节点），边 = 关联关系，环形布局（无外部依赖）
+  - **增强（同版本内）**：修复「图谱偏素、看不懂」——实体节点改为 `text` 节点并按**类别上色**（person/project/organization/tool/concept→Obsidian 预设色）、按**关联数自适应大小**（枢纽放大）、**力导向布局**（相连聚拢、无关节点分离，替代空圈）、边显示**关系类型标签**（uses/created/part_of/…）、左上角附**标题 + 类别图例**；新增 `_force_directed_layout` / `_node_size_by_degree` / `_first_nonempty_graph` 辅助函数与空图回退
+  - `superbrain.py` 新增 `obsidian canvas` 子命令
+
+### 测试
+
+- 新增 `test_obsidian.py`（7 项测试全过）：callout 渲染、block reference、安全写合法/拒绝遍历/拒绝越界、导出经安全写落盘、canvas 合法 JSON / 节点边数量一致 / 坐标范围 / 边引用存在节点。
+
+---
+
 ## v3.7.1 (2026-07-08)
 
 ### 新增：先检索后入库·代码级强制（pre-commit 硬步骤）

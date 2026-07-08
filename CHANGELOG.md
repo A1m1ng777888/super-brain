@@ -1,64 +1,65 @@
 # Changelog — Super Brain 超脑
 
+## v3.7.2 (2026-07-09)
+
+### Obsidian 本地知识库升级（Phase B：格式 / 安全 / 可视化）
+
+基于 10 个 Obsidian 相关技能的调研（Phase A），对 `sb_obsidian.py` 做三块升级：
+
+- **① 格式底座对齐（obsidian-markdown）**
+  - 元数据从 `> **类型**:` 纯文本改为 Obsidian callout 块（`> [!note]`/`[!info]`/`[!tip]`/`[!warning]`/`[!todo]`/`[!question]`/`[!quote]`，按记忆类型分色）
+  - 正文加 block reference `^sb-content`，为 Bases / 跨文件引用打底
+  - `[[wikilink]]` 双向链接保留；导出全面符合 Obsidian 风味 Markdown
+- **② 安全护栏（Vote 式安全文件 API）**
+  - 新增 `safe_write_file(filepath, content, vault_root)` + `SafeWriteError`
+  - 路径沙箱（仅限 `超脑记忆/` 导出目录）、拒绝 `..` 遍历、禁止写入 `.obsidian` 系统目录
+  - 仅用 `open()` 直写（不调 shell），结构化异常不泄露系统路径
+  - 替换 `export_to_obsidian` / `_INDEX.md` / `export_memory_as_card` 全部裸写
+- **③ 图谱可视化（json-canvas）**
+  - 新增 `export_graph_as_canvas(workspace, vault_path)`：读 `graph.json` → 生成 `超脑记忆/知识图谱.canvas`
+  - 初版：节点 = 记忆（`file` 节点链对应 `.md`）/ 实体（`text` 节点），边 = 关联关系，环形布局（无外部依赖）
+  - **增强（同版本内）**：修复「图谱偏素、看不懂」——实体节点改为 `text` 节点并按**类别上色**（person/project/organization/tool/concept→Obsidian 预设色）、按**关联数自适应大小**（枢纽放大）、**力导向布局**（相连聚拢、无关节点分离，替代空圈）、边显示**关系类型标签**（uses/created/part_of/…）、左上角附**标题 + 类别图例**；新增 `_force_directed_layout` / `_node_size_by_degree` / `_first_nonempty_graph` 辅助函数与空图回退
+  - `superbrain.py` 新增 `obsidian canvas` 子命令
+
+### 测试
+
+- 新增 `test_obsidian.py`（7 项测试全过）：callout 渲染、block reference、安全写合法/拒绝遍历/拒绝越界、导出经安全写落盘、canvas 合法 JSON / 节点边数量一致 / 坐标范围 / 边引用存在节点。
+
+---
+
 ## v3.7.1 (2026-07-08)
 
-### 新增 — 先检索后入库·代码级强制（pre-commit 硬步骤）
+### 新增：先检索后入库·代码级强制（pre-commit 硬步骤）
+
 把「对话即入库」从 SKILL.md 文档约定升级为 `superbrain.py` 的代码拦截。
 
-- `superbrain.py` 新增 `enforce_hard_step_guard(force)` + `mark_search_done()`
-- 状态文件 `DEFAULT_DATA_DIR/.hardstep.json` 记录 `last_search_ts` 与 `overrides[]`
-- `memory add` / `longterm ingest` / `memory auto-store` 三个写入命令入口接入校验
-- 窗口常量 `HARDSTEP_WINDOW_SECONDS = 30 * 60`（30 分钟任务窗口）
+- `superbrain.py` 新增 `enforce_hard_step_guard(force)` + `mark_search_done()`：
+  - 状态文件 `DEFAULT_DATA_DIR/.hardstep.json` 记录 `last_search_ts` 与 `overrides[]`
+  - `memory add` / `longterm ingest` / `memory auto-store` 三个写入命令入口接入校验
+  - 窗口常量 `HARDSTEP_WINDOW_SECONDS = 30 * 60`（30 分钟任务窗口）
 - 未满足「窗口内做过 `memory search`」则 `sys.exit(2)` 拦截，诊断区分"从未检索" / "窗口过期"
 - 三命令各加 `--force`：跳过校验并打印告警，时间戳写入 `overrides[]` 审计数组（仅用于自动化 / 明确豁免）
 - `memory search` 成功后写 `last_search_ts`，解锁后续写入
+- 状态文件读写 best-effort，异常不影响正常入库
 
 ### 测试
 - 三路径功能验证全过：① 无检索直接写入 → exit 2 拦截；② 检索后写入 → 正常；③ `--force` → 豁免 + 审计落盘
 - 验证中自身入库命令被新校验拦下，先 search 再 add 通过——闭环确认生效
 
-### 安全
-- Phase 1 安全审查通过：无个人绝对路径 / 邮箱 / 手机号泄露，Copyright / Author 署名完备
+### 背景
+- v3.7.0（2026-07-08）落地「对话即入库」文档级硬步骤约定；本版本将其升级为代码强制（用户拍板「需要强制」）
+
+---
 
 ## v3.7.0 (2026-07-08)
 
-### Karpathy 认知 OS 五条蒸馏全落地
-
-Karpathy 6 心智模型 + 8 决策启发式 → 超脑 5 条固件升级。
-
-### 新增 — 尾部可靠性门控（B）
-自检 9→12 项，新增 3 个门控极端场景自检项：
-- `check_gating_salience_bounds` — 验证所有 salience 在 [0,1] 区间
-- `check_gating_demote_integrity` — 验证手动 demote 真正生效
-- `check_gating_flood_protection` — 验证工作空间不溢出容量上限
-
-### 新增 — 幽灵标注（A）
-- `sb_memory.py` 新增 `PROVENANCE_LABELS` + `compute_provenance()`
-- `add_memory` 入库即标 provenance 字段（verified/inferred/reasoning_step/unknown）
-- `get_context` 输出带来源标签（✅已验证/🧠推断/🔗推理步骤/❓未标注）
-
-### 新增 — 套装固化（E）
-- `sb_gating.py` 新增 `_audit_log()` / `rollback()` / `explain()` + `audit_log.json`
-- 所有 auto/manual promote/demote/chain_ignite 写入审计日志（保留 500 条）
-- 新增 `gating audit/rollback/explain` CLI
-
-### 新增 — 构建即理解校验（D）
-- `sb_longterm.py` 新增 `comprehension_check()`
-- ingest 管线入库前做独立复述校验（三进制哈希 Jaccard 对比）
-- 未通过 → 降置信度 + 标 "needs_review" / "needs_verification"
-
-### 新增 — 能力感知路由（C）
-- 新建 `sb_capability.py`（8 项能力画像 + 能力检查 + 编排器集成）
-- `sb_orchestrator.assess_complexity` 返回 `capability_warnings`
-- 新增 `capability list/check/update` CLI
-
-### 修复
-- `sb_selfcheck.get_health_score` 重复循环 bug（逻辑检查执行了两次）
-- `sb_gating.py` 新增 `import uuid`（审计日志依赖）
-
-### 测试
+### 变更：Karpathy 认知 OS 五条蒸馏全落地（详见发布级 CHANGELOG v3.7.0 条目）
+- 尾部可靠性门控（自检 9→12 项，新增 3 个门控极端场景检查：salience 边界/demote 持久性/工作空间溢出保护）
+- 幽灵标注（provenance 字段 + compute_provenance()，入库即标，get_context 输出带来源标签）
+- 套装固化（sb_gating.py 审计日志 _audit_log()/rollback()/explain() + gating audit/rollback/explain CLI）
+- 构建即理解校验（sb_longterm.py comprehension_check()，ingest 入库前独立复述校验）
+- 能力感知路由（新建 sb_capability.py，8 项能力画像+能力检查+编排器集成，capability list/check/update CLI）
 - 49/49 回归测试全通过
-- test_superbrain.py 断言 9→12 项已更新
 
 ## v3.6.1 (2026-07-08)
 

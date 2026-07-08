@@ -641,7 +641,7 @@ def cmd_version(args):
     print(f"Features: memory (v3.1 anti-pollution), search (v3.0 ternary hash+fuzzy), "
           f"perception (v3.0), pipeline (v3.1 cleanup), reasoning (v3.1 warmup), "
           f"entanglement (v3.1 warmup), context (v3.0), longterm (v3.0), "
-          f"obsidian (v3.1 export+sync), session (v3.1 T1+T2+T3), "
+          f"obsidian (v3.7.2 export+sync+canvas), session (v3.1 T1+T2+T3), "
           f"orchestrator (v3.2 sub-agent decomposition, "
           f"v3.2.1 implicit scope detection, v3.2.2 ambient via SOUL.md), "
           f"self-check (v2.1 temporal), SkillOpt, traces, workspace isolation")
@@ -1072,6 +1072,13 @@ def cmd_obsidian_stats(args):
     """Obsidian sync statistics."""
     from sb_obsidian import get_obsidian_stats
     print_json(get_obsidian_stats(args.workspace, getattr(args, 'vault_path', None)))
+
+
+def cmd_obsidian_canvas(args):
+    """Export knowledge graph as Obsidian .canvas (json-canvas)."""
+    from sb_obsidian import export_graph_as_canvas
+    result = export_graph_as_canvas(args.workspace, getattr(args, 'vault_path', None))
+    print_json(result)
 
 
 # v3.2.0: Orchestrator handlers
@@ -1726,7 +1733,7 @@ def build_parser():
     sp.set_defaults(func=cmd_session_health)
 
     # v3.1.0: Obsidian bidirectional sync
-    sp_obsidian = subparsers.add_parser("obsidian", help="Obsidian sync (v3.1.0)")
+    sp_obsidian = subparsers.add_parser("obsidian", help="Obsidian sync (v3.7.2)")
     obsidian_sub = sp_obsidian.add_subparsers(dest="obsidian_command")
 
     sp = obsidian_sub.add_parser("export", help="Export all memories to .md + [[wikilinks]]")
@@ -1745,6 +1752,11 @@ def build_parser():
     sp.add_argument("--workspace", help="Workspace name")
     sp.add_argument("--vault-path", help="Obsidian vault path")
     sp.set_defaults(func=cmd_obsidian_stats)
+
+    sp = obsidian_sub.add_parser("canvas", help="Export knowledge graph as .canvas (json-canvas)")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.add_argument("--vault-path", help="Obsidian vault path")
+    sp.set_defaults(func=cmd_obsidian_canvas)
 
     # v3.2.0: Sub-Agent Orchestrator
     sp_orch = subparsers.add_parser("orchestrate", help="Sub-agent orchestrator (v3.2.0)")
