@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.7.2
+version: v3.7.3
 released: 2026-07-09
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.7.2。Karpathy 认知 OS 蒸馏落地——全局工作空间门控层(GWT)、尾部可靠性自检(12项，+3门控极端场景)、幽灵标注(provenance标签)、审计日志+回滚+解释(套装固化)、构建即理解校验(comprehension_check)、能力感知路由(锯齿状智能)。基础功能：Goal Continuation续跑+前置评估始终在线+T2阶段感知自动触发。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance。v3.7.2 新增「先检索后入库」代码级强制：写入命令未先 search 则拦截，--force 可显式豁免并审计"
+description: "Super Brain 超脑认知增强技能 v3.7.3。Karpathy 认知 OS 蒸馏落地——全局工作空间门控层(GWT)、尾部可靠性自检(12项，+3门控极端场景)、幽灵标注(provenance标签)、审计日志+回滚+解释(套装固化)、构建即理解校验(comprehension_check)、能力感知路由(锯齿状智能)。基础功能：Goal Continuation续跑+前置评估始终在线+T2阶段感知自动触发。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance。v3.7.2 新增「先检索后入库」代码级强制：写入命令未先 search 则拦截，--force 可显式豁免并审计"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.7.2
+# Super Brain (超脑) — 认知增强技能 v3.7.3
 
 ## 概述
 
@@ -40,7 +40,7 @@ Super Brain 的 Obsidian 同步模块（v3.7.2）提供：
 
 - **格式底座对齐 obsidian-markdown**：元数据用 callout 块（`> [!note]` 等按类型分色），正文带 block reference（`^sb-content`）供 Bases / 跨文件引用；`[[wikilink]]` 双向链接保留。导出全面符合 Obsidian 风味 Markdown，可被 Obsidian 原生渲染、被其他 agent 复用。
 - **安全护栏（Vote 式安全文件 API）**：所有写入 vault 的操作走 `safe_write_file` 受控封装——路径沙箱（仅限 `超脑记忆/` 导出目录）、拒绝 `..` 遍历、禁止写入 `.obsidian` 系统目录，仅用 `open()` 直写（不调 shell）。结构化异常不泄露系统路径。
-- **图谱可视化（json-canvas，v3.7.2 增强）**：`SB obsidian canvas` 将 `graph.json` 导出为 `超脑记忆/知识图谱.canvas`。增强点：① 节点按**类别上色**（person/project/organization/tool/concept 映射到 Obsidian 预设色）；② 节点**大小按关联数**自适应（枢纽节点自动放大）；③ **力导向布局**（相连节点聚拢、无关节点分离，不再是空圈）；④ 边显示**关系类型标签**（uses/created/part_of/…）；⑤ 画布左上角附**标题 + 类别图例**。实体节点为 `text` 节点（含名称与类别副标题），无依赖纯算法生成。
+- **图谱可视化（json-canvas，v3.7.2 记忆级增强）**：`SB obsidian canvas` 将 `graph.json` + 全部记忆导出为 `超脑记忆/知识图谱.canvas`，**三类节点共存**：① 实体节点（`graph.json`，按类别上色 + 按关联数定大小）；② 主题节点（记忆 `entity` 去重，每个主题一个绿色文本节点）；③ **记忆节点（每条记忆一个 `file` 节点，链对应 `.md`，按记忆 type 上色）**。边含实体间关系（uses/created/part_of…，显示标签）+ 记忆→主题归属边（同 `entity` 的记忆聚成星系环绕主题节点）。双组件力导向布局（实体组件与记忆组件各自收敛后并排），无依赖纯算法生成。左上角附标题 + 图例。
 
 ### 没有 Obsidian 会怎样？
 
@@ -53,6 +53,29 @@ Super Brain 的 Obsidian 同步模块（v3.7.2）提供：
 超脑（`~/.workbuddy/super-brain/` 的 JSON 记忆）负责机器可检索的语义层；本地知识库（Obsidian Vault / 工作区 `MEMORY.md` / 用户级 `~/.workbuddy/MEMORY.md`）负责人可读速查层。两者**冗余并存是设计特征**，不视为冲突。
 硬步骤约定确保二者同步而非二选一：涉及技术/项目/偏好的任务，先 `SB memory search` 召回、再 `SB longterm ingest` / `memory add` 入库，本地 `MEMORY.md` 仅作冗余备份，不可当替身。（2026-07-08 升级为 pre-commit 级，详见上文「核心工作流 > 1. 对话即入库」）
 
+### 通用版首次配置向导（Onboarding）
+
+> 仅通用版（GitHub clone）需要此向导。本地版（作者环境）已硬编码主库路径，自动跳过本向导。
+
+通用版**不假设任何 vault 路径**。使用者首次使用 Obsidian 同步时，必须在**一次对话**内完成以下两步：
+
+**第 1 步 — 询问（必做）**
+用 `AskUserQuestion` 或对话询问两个信息：
+1. **Obsidian 安装情况与位置**：是否安装？装在哪？（未安装则进入「先给模板、装好再配」分支）
+2. **主仓库（vault）路径**：使用者的知识库根目录在哪？（记忆导出目标，不能写死）
+
+**第 2 步 — 提供搭建模板**
+询问完成后，向使用者提供 `references/obsidian-vault-template.md`（路径无关的本地知识库搭建模板），并按使用者的 vault 路径定制示例中的 `<VAULT>` 占位符。
+
+**分支处理**
+- **尚未安装 Obsidian**：先给模板与目录约定，说明「装好 Obsidian 并确定 vault 后，设 `OBSIDIAN_VAULT_PATH` 或 `--vault-path` 再跑 `obsidian export`」，暂不强制配置。
+- **已装且给出 vault**：引导其设 `OBSIDIAN_VAULT_PATH`（或记 `--vault-path`），立即跑一次 `obsidian export` 验证导出落盘正确。
+
+**关键约束**
+- 通用版代码里的 `DEFAULT_VAULT_PATH` 必须是**通用回退值**（如 `~/ObsidianVault`），**严禁硬编码作者机器路径**——否则 Phase 1 安全审查会判定为个人路径泄露并拦截发布。
+- 路径决策权完全交给使用者；AI 只问、只提供模板，不替使用者定路径。
+- 发布前脱敏（已固化）：本地活代码保留硬编码主库以获得开箱即用便利；发布到 GitHub 前，对 clone-temp 副本运行 `scripts/prepublish_strip_local_paths.py --target-dir <clone-temp根目录> --apply`，自动将硬编码 vault 路径还原为 `~/ObsidianVault`（脚本路径无关、自身过 Phase 1，只改发布副本、不动本地）。推荐顺序：Phase 3 同步 → 跑此脚本 → Phase 1 审查 → 推送。
+
 ### 请自主选择
 
 **选项 A：安装 Obsidian，获得完整体验**
@@ -60,7 +83,7 @@ Super Brain 的 Obsidian 同步模块（v3.7.2）提供：
 1. 从 [obsidian.md](https://obsidian.md) 下载安装
 2. 打开已有 vault 或创建新 vault
 3. 运行 `SB obsidian export` 将记忆导出为 `.md`
-4. 推荐 vault 路径：`本地知识库v1/`（Super Brain 默认写入 `本地知识库v1/超脑记忆/`）
+4. 推荐 vault 路径：任意你习惯的目录（如 `~/MyVault`）；Super Brain 默认写入 `<vault>/超脑记忆/`，可用 `OBSIDIAN_VAULT_PATH` 环境变量或 `--vault-path` 覆盖
 
 **选项 B：不使用 Obsidian，用其他方式管理本地知识库**
 

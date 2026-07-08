@@ -1,5 +1,19 @@
 # Changelog — Super Brain 超脑
 
+## v3.7.3 (2026-07-09)
+
+### 修复 / 安全 — 发布前路径脱敏固化
+- 新增 `scripts/prepublish_strip_local_paths.py`：路径无关（自身不含任何个人路径），发布前将硬编码 vault 路径还原为通用回退值 `~/ObsidianVault`；默认 dry-run 预览，`--apply` 才改写；只改 clone-temp 发布副本，绝不碰本地活代码
+- 本地版与通用版（GitHub clone）边界彻底分清：本地版保留硬编码主库以获得开箱即用便利；通用版经脱敏脚本处理后发布，可过 Phase 1 安全审查（个人路径泄露拦截）
+
+### 新增 — 通用版首次配置向导 + 路径无关搭建模板
+- `SKILL.md` 新增「通用版首次配置向导」：使用者首次使用 Obsidian 同步时，一次对话内先问 Obsidian 安装位置 + 主仓库(vault)路径，再给 `references/obsidian-vault-template.md`
+- vault 路径决策权完全交给使用者；AI 只问、只提供模板，不替使用者定路径
+
+### 增强 — 记忆级知识图谱（v3.7.2 补强，随本版正式发布）
+- `export_graph_as_canvas` 重写为三类节点（实体 text / 主题 text / 记忆 file）+ 双组件力导向；主库实测 258 节点 / 194 边
+- 承接 v3.7.2 的 callout 格式、block reference、safe_write_file 安全护栏
+
 ## v3.7.2 (2026-07-09)
 
 ### Obsidian 本地知识库升级（Phase B：格式 / 安全 / 可视化）
@@ -20,6 +34,7 @@
   - 初版：节点 = 记忆（`file` 节点链对应 `.md`）/ 实体（`text` 节点），边 = 关联关系，环形布局（无外部依赖）
   - **增强（同版本内）**：修复「图谱偏素、看不懂」——实体节点改为 `text` 节点并按**类别上色**（person/project/organization/tool/concept→Obsidian 预设色）、按**关联数自适应大小**（枢纽放大）、**力导向布局**（相连聚拢、无关节点分离，替代空圈）、边显示**关系类型标签**（uses/created/part_of/…）、左上角附**标题 + 类别图例**；新增 `_force_directed_layout` / `_node_size_by_degree` / `_first_nonempty_graph` 辅助函数与空图回退
   - `superbrain.py` 新增 `obsidian canvas` 子命令
+  - **记忆级图谱（补强）**：全部记忆也画进画布——每条记忆一个 `file` 节点（链对应 `.md`，按记忆 type 上色），按 `entity` 去重生成绿色主题节点，记忆→主题归属边使同主题记忆聚成「星系」环绕主题节点；双组件力导向（实体组件与记忆组件各自收敛后并排）。主库实测：258 节点（29 实体 + 52 主题 + 169 记忆 + 8 图例）/ 194 边（25 实体关系 + 169 记忆归属）
 
 ### 测试
 

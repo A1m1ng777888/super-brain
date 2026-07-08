@@ -1738,7 +1738,7 @@ def build_parser():
 
     sp = obsidian_sub.add_parser("export", help="Export all memories to .md + [[wikilinks]]")
     sp.add_argument("--workspace", help="Workspace name")
-    sp.add_argument("--vault-path", help="Obsidian vault path (set OBSIDIAN_VAULT_PATH env var or defaults to ~/ObsidianVault)")
+    sp.add_argument("--vault-path", help="Obsidian vault path (defaults to ~/ObsidianVault; override via OBSIDIAN_VAULT_PATH)")
     sp.add_argument("--no-graph", action="store_true", help="Skip graph edges")
     sp.set_defaults(func=cmd_obsidian_export)
 

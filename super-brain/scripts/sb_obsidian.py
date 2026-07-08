@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SuperBrain Obsidian Bidirectional Sync v3.7.2
+SuperBrain Obsidian Bidirectional Sync v3.7.3
 Exports memory and graph data as Obsidian-compatible .md files with [[wikilinks]].
 
 Design principles:
@@ -82,7 +82,8 @@ def safe_write_file(filepath, content, vault_root=None):
     return abs_target
 
 
-# Default Obsidian vault path — use env var or fall back to generic path
+# Default Obsidian vault path — use env var or fall back to the user's primary vault.
+# 主库（"家"）= ~/ObsidianVault；OBSIDIAN_VAULT_PATH 仍可覆盖。
 DEFAULT_VAULT_PATH = os.environ.get("OBSIDIAN_VAULT_PATH", os.path.expanduser("~/ObsidianVault"))
 DEFAULT_EXPORT_DIR = "超脑记忆"
 
@@ -456,7 +457,7 @@ def export_to_obsidian(workspace=None, vault_path=None, include_graph=True):
                 lines.append(f"- 失效: {memory['valid_until']}")
         
         lines.append("")
-        lines.append(f"*由 Super Brain v3.7.2 自动生成 · {now.strftime('%Y-%m-%d %H:%M')}*")
+        lines.append(f"*由 Super Brain v3.7.3 自动生成 · {now.strftime('%Y-%m-%d %H:%M')}*")
         
         safe_write_file(filepath, "\n".join(lines), vault_path)
         
@@ -494,7 +495,7 @@ def export_to_obsidian(workspace=None, vault_path=None, include_graph=True):
         index_lines.append("")
     
     index_lines.append("---")
-    index_lines.append("*由 Super Brain v3.7.2 自动维护*")
+    index_lines.append("*由 Super Brain v3.7.3 自动维护*")
     
     index_path = os.path.join(export_dir, "_INDEX.md")
     safe_write_file(index_path, "\n".join(index_lines), vault_path)
@@ -757,111 +758,160 @@ def _first_nonempty_graph():
 
 
 def export_graph_as_canvas(workspace=None, vault_path=None):
-    """导出知识图谱 → Obsidian .canvas（json-canvas 规范，v3.7.2 增强版）。
+    """导出知识图谱 → Obsidian .canvas（json-canvas 规范，v3.7.2 记忆级增强版）。
 
-    增强点（对比初版）：
-    - 节点按「类别」上色（person/project/...），一眼区分实体类型
-    - 节点按「关联数」定大小，枢纽节点自动放大
-    - 力导向布局：相连节点聚拢、无关节点分离，不再是空圈
-    - 边显示「关系类型」标签（uses/created/part_of/...）
-    - 画布左上角附「标题 + 类别图例」
+    节点三类：
+    1. 实体节点（graph.json）：按「类别」上色（person/project/...），按关联数定大小
+    2. 主题节点（记忆 entity 去重）：每个主题一个文本节点，记忆环绕其聚成星系
+    3. 记忆节点（每条记忆一个 file 节点，链对应 .md）：按记忆 type 上色
 
-    返回导出统计 dict。
+    边两类：
+    - 实体间关系（uses/created/part_of/...，显示标签）
+    - 记忆→主题（归属关系，每记忆连到自己的 entity 主题节点）
+
+    布局：实体组件与记忆组件各自力导向后并排（双组件，避免大图交织）。
+    左上角附标题 + 图例。
     """
     graph = read_graph(workspace)
     if not graph.get("nodes"):
         graph = _first_nonempty_graph()
+    memories = read_memories(workspace)
     export_dir = get_vault_memory_dir(vault_path)
 
-    # 规范化节点
+    # 记忆 type → canvas 预设色（1-6），与实体配色区分
+    MEM_CANVAS_COLOR = {
+        "fact": "4", "decision": "1", "preference": "3",
+        "event": "2", "task": "5", "relationship": "4", "context": "4",
+    }
+    TOPIC_COLOR = "6"  # 记忆主题节点
+
+    # --- 实体节点（graph.json）---
     raw_nodes = graph.get("nodes", {})
     if isinstance(raw_nodes, dict):
-        node_map = raw_nodes
+        entity_map = raw_nodes
     elif isinstance(raw_nodes, list):
-        node_map = {n.get("id", f"n{i}"): n for i, n in enumerate(raw_nodes)}
+        entity_map = {n.get("id", f"n{i}"): n for i, n in enumerate(raw_nodes)}
     else:
-        node_map = {}
+        entity_map = {}
+    entity_ids = list(entity_map.keys())
 
-    node_ids = list(node_map.keys())
-    present = set(node_ids)
+    # --- 记忆节点 + 主题节点（按 entity 聚类）---
+    mem_file_map = {}   # mid -> .md 文件名
+    mem_type = {}       # mid -> type
+    topic_nodes = {}    # tkey -> tid
+    topic_orig = {}     # tkey -> 原始 entity 名
+    mem_to_topic = []   # (mid, tid)
+    for i, m in enumerate(memories):
+        mid = m.get("id") or f"mem_{i}"
+        mem_file_map[mid] = _memory_to_note_title(m) + ".md"
+        mem_type[mid] = m.get("type", "fact")
+        ent = (m.get("entity") or "未分类").strip() or "未分类"
+        tkey = ent.lower()
+        if tkey not in topic_nodes:
+            topic_nodes[tkey] = f"topic_{len(topic_nodes)}"
+            topic_orig[tkey] = ent
+        mem_to_topic.append((mid, topic_nodes[tkey]))
+    topic_ids = list(topic_nodes.values())
 
-    # 规范化边 + 过滤掉指向不存在节点的边
+    # --- 边 ---
     raw_edges = graph.get("edges", {})
     if isinstance(raw_edges, dict):
-        edge_list = list(raw_edges.values())
+        ent_edge_list = list(raw_edges.values())
     elif isinstance(raw_edges, list):
-        edge_list = raw_edges
+        ent_edge_list = raw_edges
     else:
-        edge_list = []
-    valid_edges = [e for e in edge_list
-                   if e.get("source") in present and e.get("target") in present]
+        ent_edge_list = []
+    ent_valid = [e for e in ent_edge_list
+                 if e.get("source") in set(entity_ids) and e.get("target") in set(entity_ids)]
+    mem_valid = [{"source": s, "target": t, "type": "about"} for s, t in mem_to_topic]
+    all_edges = ent_valid + mem_valid
 
-    # 度数
+    # 度数（覆盖所有节点：实体 + 主题 + 记忆）
     deg = Counter()
-    for e in valid_edges:
+    for e in all_edges:
         deg[e["source"]] += 1
         deg[e["target"]] += 1
 
-    # 力导向布局（图整体向右下偏移，给左上角图例留白）
-    layout = _force_directed_layout(node_ids, valid_edges)
-    OFFSET_X, OFFSET_Y = 540, 280
+    # --- 双组件布局（各自力导向后并排，避免交织）---
+    layout_ent = _force_directed_layout(entity_ids, ent_valid, iterations=250)
+    mem_comp_ids = topic_ids + list(mem_file_map.keys())
+    layout_mem = _force_directed_layout(mem_comp_ids, mem_valid, iterations=250)
+    ent_max_x = max((layout_ent[i][0] for i in entity_ids), default=0)
+    MEM_OFF_X = ent_max_x + 760
+    OFF_X, OFF_Y = 540, 280
 
     canvas_nodes = []
-    for nid in node_ids:
-        n = node_map[nid]
+    # 实体节点
+    for nid in entity_ids:
+        n = entity_map[nid]
         name = n.get("name") or n.get("label") or nid
         ntype = n.get("type", "concept")
         color = CANVAS_NODE_COLOR.get(ntype, "6")
         w, h = _node_size_by_degree(deg[nid])
-        text = f"**{name}**\n_{ntype}_"
         canvas_nodes.append({
-            "id": nid,
-            "type": "text",
-            "text": text,
+            "id": nid, "type": "text",
+            "text": f"**{name}**\n_{ntype}_",
             "color": color,
-            "x": layout[nid][0] + OFFSET_X,
-            "y": layout[nid][1] + OFFSET_Y,
-            "width": w,
-            "height": h,
+            "x": layout_ent[nid][0] + OFF_X, "y": layout_ent[nid][1] + OFF_Y,
+            "width": w, "height": h,
+        })
+    # 主题节点
+    for tkey, tid in topic_nodes.items():
+        w, h = _node_size_by_degree(deg[tid])
+        canvas_nodes.append({
+            "id": tid, "type": "text",
+            "text": f"# {topic_orig.get(tkey, tkey)}",
+            "color": TOPIC_COLOR,
+            "x": layout_mem[tid][0] + MEM_OFF_X, "y": layout_mem[tid][1] + OFF_Y,
+            "width": max(160, int(w * 0.7)), "height": max(56, int(h * 0.55)),
+        })
+    # 记忆节点（file，链 .md）
+    for mid in mem_file_map:
+        mtype = mem_type.get(mid, "fact")
+        canvas_nodes.append({
+            "id": mid, "type": "file", "file": mem_file_map[mid],
+            "color": MEM_CANVAS_COLOR.get(mtype, "4"),
+            "x": layout_mem[mid][0] + MEM_OFF_X, "y": layout_mem[mid][1] + OFF_Y,
+            "width": 200, "height": 70,
         })
 
-    # 边：显示关系类型标签，按相对位置选最优连接侧
+    # 边
     canvas_edges = []
-    for i, e in enumerate(valid_edges):
+    for i, e in enumerate(ent_valid):
         src, tgt = e["source"], e["target"]
-        dx = layout[tgt][0] - layout[src][0]
+        dx = layout_ent[tgt][0] - layout_ent[src][0]
         fs, ts = ("right", "left") if dx >= 0 else ("left", "right")
         label = e.get("type", "") or e.get("label", "") or ""
         canvas_edges.append({
-            "id": f"edge-{i}",
-            "fromNode": src,
-            "toNode": tgt,
-            "label": label,
-            "fromSide": fs,
-            "toSide": ts,
+            "id": f"eent-{i}", "fromNode": src, "toNode": tgt,
+            "label": label, "fromSide": fs, "toSide": ts,
+        })
+    for i, (s, t) in enumerate(mem_to_topic):
+        canvas_edges.append({
+            "id": f"emem-{i}", "fromNode": s, "toNode": t,
+            "label": "", "fromSide": "right", "toSide": "left",
         })
 
-    # 标题 + 类别图例（左上角 x<520 区，避免与图重叠）
+    # 标题 + 图例（左上角，避免与图重叠）
     canvas_nodes.append({
-        "id": "legend_title",
-        "type": "text",
-        "text": f"# 超脑记忆知识图谱\n{len(node_ids)} 个实体 · {len(valid_edges)} 条关系\n\n色块=类别 · 框大=关联多 · 连线标签=关系",
-        "x": 60, "y": 60,
-        "width": 420, "height": 180,
-        "color": "6",
+        "id": "legend_title", "type": "text",
+        "text": (f"# 超脑记忆知识图谱\n{len(entity_ids)} 实体 · {len(topic_nodes)} 主题 · "
+                 f"{len(mem_file_map)} 记忆\n\n色块=类别 · 框大=关联多 · 连线=关系/归属"),
+        "x": 60, "y": 60, "width": 470, "height": 200, "color": "6",
     })
-    ly = 280
+    ly = 300
     for ntype in CANVAS_LEGEND_ORDER:
-        if any(n.get("type") == ntype for n in node_map.values()):
+        if any(n.get("type") == ntype for n in entity_map.values()):
             canvas_nodes.append({
-                "id": f"legend_{ntype}",
-                "type": "text",
-                "text": f"**{ntype}**",
-                "color": CANVAS_NODE_COLOR.get(ntype, "6"),
-                "x": 60, "y": ly,
-                "width": 220, "height": 54,
+                "id": f"legend_{ntype}", "type": "text",
+                "text": f"**{ntype}**", "color": CANVAS_NODE_COLOR.get(ntype, "6"),
+                "x": 60, "y": ly, "width": 220, "height": 54,
             })
             ly += 70
+    canvas_nodes.append({"id": "legend_mem", "type": "text", "text": "■ 记忆(file)",
+                         "color": "4", "x": 60, "y": ly, "width": 220, "height": 54}); ly += 70
+    canvas_nodes.append({"id": "legend_topic", "type": "text", "text": "# 主题(记忆聚类)",
+                         "color": TOPIC_COLOR, "x": 60, "y": ly, "width": 220, "height": 54})
 
     canvas = {"nodes": canvas_nodes, "edges": canvas_edges}
     canvas_path = os.path.join(export_dir, "知识图谱.canvas")
@@ -871,8 +921,8 @@ def export_graph_as_canvas(workspace=None, vault_path=None):
         "exported": True,
         "canvas": "知识图谱.canvas",
         "path": canvas_path,
-        "nodes": len(node_ids),
-        "edges": len(valid_edges),
+        "nodes": len(entity_ids) + len(topic_nodes) + len(mem_file_map),
+        "edges": len(all_edges),
         "vault_path": vault_path or DEFAULT_VAULT_PATH,
     }
 
