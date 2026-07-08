@@ -1,19 +1,21 @@
 ---
 name: super-brain
-version: v3.7.0
+version: v3.7.1
 released: 2026-07-08
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.7。Karpathy 认知 OS 蒸馏落地——全局工作空间门控层(GWT)、尾部可靠性自检(12项，+3门控极端场景)、幽灵标注(provenance标签)、审计日志+回滚+解释(套装固化)、构建即理解校验(comprehension_check)、能力感知路由(锯齿状智能)。基础功能：Goal Continuation续跑+前置评估始终在线+T2阶段感知自动触发。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance"
+description: "Super Brain 超脑认知增强技能 v3.7.1。Karpathy 认知 OS 蒸馏落地——全局工作空间门控层(GWT)、尾部可靠性自检(12项，+3门控极端场景)、幽灵标注(provenance标签)、审计日志+回滚+解释(套装固化)、构建即理解校验(comprehension_check)、能力感知路由(锯齿状智能)。基础功能：Goal Continuation续跑+前置评估始终在线+T2阶段感知自动触发。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance。v3.7.1 新增「先检索后入库」代码级强制：写入命令未先 search 则拦截，--force 可显式豁免并审计"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.7.0
+# Super Brain (超脑) — 认知增强技能 v3.7.1
 
 ## 概述
 
 超脑是一个认知增强系统，为 AI 提供**持久记忆、知识图谱、语义搜索、自动推理、关联挖掘、对话即入库、分类管线、感知增强、子Agent编排**等核心能力。它解决了 AI Agent 的先天缺陷：跨会话失忆、上下文断裂、搜索低效、知识孤岛、无法推理、表达不通、单Agent上下文污染。
 
 **v3.7.0 升级：Karpathy 认知 OS 五条蒸馏全落地。** 五路并行——① 尾部可靠性门控（自检 9→12 项，新增 3 个门控极端场景检查：salience 边界/demote 持久性/工作空间溢出保护）；② 幽灵标注（provenance 字段 + `compute_provenance()` 入库即标，`get_context()` 输出带标签：✅已验证/🧠推断/🔗推理步骤/❓未标注）；③ 套装固化（`sb_gating.py` 新增审计日志 `_audit_log()` + `rollback()` 回滚 + `explain()` 解释，`gating audit/rollback/explain` CLI）；④ 构建即理解校验（`sb_longterm.py` 新增 `comprehension_check()`，ingest 管�线入库前独立复述校验，未通过→降置信度+标待验证）；⑤ 能力感知路由（新建 `sb_capability.py`，8 项能力画像+能力检查+编排器集成，`capability list/check/update` CLI）。49/49 回归测试全通过。
+
+**v3.7.1 升级：先检索后入库·代码级强制。** 把「对话即入库」从文档约定升级为 `superbrain.py` 的代码拦截——`memory add` / `longterm ingest` / `memory auto-store` 三个写入命令执行前校验「30 分钟窗口内是否做过 `memory search`」，未满足则 `exit 2` 拦截；`--force` 可显式豁免并写入 `.hardstep.json` 审计。详见「命令参考 > v3.7.1 变更」。
 
 所有数据本地存储（默认 `~/.workbuddy/super-brain/`），不依赖任何外部服务或 API。
 
@@ -40,6 +42,10 @@ Super Brain 的 Obsidian 同步模块（v3.1.0+）提供：
 - ❌ 记忆的 `.md` 文件导出与图谱可视化
 - ❌ 双向同步（在 Obsidian 中编辑后写回 Super Brain）
 - ❌ 与本地知识库的深度关联
+
+**超脑语义层 × 本地知识库 = 互补分层（设计特征，非单一真相源）**
+超脑（`~/.workbuddy/super-brain/` 的 JSON 记忆）负责机器可检索的语义层；本地知识库（Obsidian Vault / 工作区 `MEMORY.md` / 用户级 `~/.workbuddy/MEMORY.md`）负责人可读速查层。两者**冗余并存是设计特征**，不视为冲突。
+硬步骤约定确保二者同步而非二选一：涉及技术/项目/偏好的任务，先 `SB memory search` 召回、再 `SB longterm ingest` / `memory add` 入库，本地 `MEMORY.md` 仅作冗余备份，不可当替身。（2026-07-08 升级为 pre-commit 级，详见上文「核心工作流 > 1. 对话即入库」）
 
 ### 请自主选择
 
@@ -195,6 +201,14 @@ SB memory auto-store --text "用户偏好使用TypeScript进行开发"
 ```
 
 系统自动完成：感知判断 → 信息价值评估 → 分类（定义/闲聊）→ 关键点提取 → 存储入记忆库 → 更新索引。
+
+> **⚠️ pre-commit 级硬步骤（2026-07-08 用户拍板升级）**
+> 上述入库不是「可选动作」，而是**非写不可的硬步骤**，且须前置检索：
+> - **动手前**必跑 `SB memory search` 召回相关记忆（确认是否新主题、与既有知识如 dive-into-llms / 本地部署决策建关联）
+> - **过程/收尾**必跑 `SB longterm ingest` 或 `SB memory add --type` 对话即入库
+> - 本地 `MEMORY.md`（工作区 / 用户级）仅作**冗余速查备份**，**不可作为超脑语义层的替身**——两者是独立路径，禁止只写本地而漏掉超脑
+> - 触发范围：技术调研、模型/工具学习、项目决策、用户偏好分享等
+> - **已由 superbrain.py 代码强制**：`memory add` / `longterm ingest` / `auto-store` 三个写入命令在执行时会校验「近期（30 分钟窗口内）是否做过 memory search」；未满足则拦截（exit 2，打印诊断）。需要显式豁免时在原命令后加 `--force`（会被写入审计，仅用于自动化 / 明确豁免场景）。检索状态存于 `DEFAULT_DATA_DIR/.hardstep.json`。
 
 ### 2. 零成本检索（v3.0.0 新增）
 
@@ -374,6 +388,13 @@ v3.0.0 搜索引擎融合六个信号通道：
 | `capability check <cap_id>` | 查询单项能力的可靠性+降级策略 |
 | `capability update <cap_id> --score 0.X` | 更新能力评分或证据引用 |
 
+### v3.7.1 变更（先检索后入库·代码强制）
+
+- **硬步骤代码强制**：`memory add` / `longterm ingest` / `memory auto-store` 三个写入命令执行前调用 `enforce_hard_step_guard()`，校验 `.hardstep.json` 的 `last_search_ts` 是否在 30 分钟窗口内；未满足则 `exit 2` 拦截并打印诊断（区分"从未检索" / "窗口过期"）。
+- **`--force` 显式豁免**：三命令各加 `--force`，跳过校验时打印告警并写入 `.hardstep.json` 的 `overrides[]` 审计数组（仅用于自动化 / 明确豁免场景）。
+- **`memory search` 打戳**：成功后写 `last_search_ts`，解锁后续写入。
+- 状态文件：`DEFAULT_DATA_DIR/.hardstep.json`（best-effort，读写失败不影响正常入库）。
+
 ### v3.6.1 变更（门控层自动接线）
 
 ### v3.4.0 新增命令
@@ -447,6 +468,7 @@ v3.0.0 搜索引擎融合六个信号通道：
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.7.1** | **2026-07-08** | **先检索后入库·代码级强制：** `superbrain.py` 新增 `enforce_hard_step_guard()` + `mark_search_done()`，对 `memory add` / `longterm ingest` / `memory auto-store` 三个写入命令做拦截——未检测到「30 分钟窗口内做过 `memory search`」则 `exit 2` 拦截并打印诊断；三命令各加 `--force` 显式豁免（写入 `.hardstep.json` 的 `overrides[]` 审计）；`memory search` 成功后写 `last_search_ts`。状态文件 `DEFAULT_DATA_DIR/.hardstep.json`（best-effort）。功能验证拦截/放行/豁免三路径全过。 |
 | **v3.7.0** | **2026-07-08** | **Karpathy 认知 OS 五条蒸馏全落地：** ① 尾部可靠性门控——`sb_selfcheck.py` 新增 3 个门控极端场景自检项（salience_bounds/demote_integrity/flood_protection），自检总数 9→12，health_score 更新；② 幽灵标注——`sb_memory.py` 新增 PROVENANCE_LABELS + `compute_provenance()`，`add_memory` 入库即标，`get_context` 输出带来源标签（✅已验证/🧠推断/🔗推理步骤/❓未标注）；③ 套装固化——`sb_gating.py` 新增审计日志 `_audit_log()` / `rollback()` / `explain()` + `audit_log.json`，`gating audit/rollback/explain` CLI；④ 构建即理解校验——`sb_longterm.py` 新增 `comprehension_check()`，ingest 管�线入库前独立复述校验；⑤ 能力感知路由——新建 `sb_capability.py`（8 项能力画像+能力检查+编排器集成），`capability list/check/update` CLI。修复 `get_health_score` 重复循环 bug。49/49 回归全通过。 |
 | **v3.6.1** | **2026-07-08** | **门控层自动接线（GWT 选择性原则落地 ingest 主干）：** `sb_memory.py` 的 `add_memory` 写盘前调用 `compute_salience` + `is_promoted`，使 `memory add` / `auto_store` / `longterm ingest` 全部入口入库即按显著度自动晋升（salience→`workspace_promoted`）。修复 demote 失效：原 `get_active_workspace` 手动 demote 被显著度重算覆盖，新增 `gating_override` 字段（promote/demote/None）区分手动与自动。链式点燃仍委托查询时统一做。36/36 v3.6 测试（含 11 项自动晋升新增用例）+ 49/49 回归全通过。 |
 | **v3.6.0** | **2026-07-08** | **全局工作空间门控层（Global Workspace Gating）：** 受 Anthropic《A Global Workspace in Language Models》(2026-07-06) 启发，把"对话即入库全量提升"的反 GWT 选择性问题修复为冷存储/活跃工作空间两层架构。新增 `sb_gating.py`（compute_salience 多信号显著度、get_threshold/set_threshold、is_promoted、chain_ignite 链式点燃、get_active_workspace 容量上限、promote/demote、calibrate、get_status）。`sb_memory.py` 新增 `reasoning_intermediate` 记忆类型与 salience/chain_id/reasoning_role/workspace_promoted 四字段；`get_context` 新增 `--workspace-only` 选择性过滤并透出 workspace_promoted 标志。`sb_reasoning.py` 新增 `capture_reasoning_chain` 中间推理捕获（共享顶层 chain_id + 双向 related_nodes）。CLI 新增 `gating` 子命令与 `reason capture`、`memory context --workspace-only`。25/25 v3.6 测试 + 49/49 回归全通过。 |

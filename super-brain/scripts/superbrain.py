@@ -63,6 +63,7 @@ import sys
 import os
 import json
 import argparse
+import time
 
 # Add scripts directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -139,6 +140,80 @@ from sb_orchestrator import (
 )
 
 
+# === v3.7.1: pre-commit 硬步骤代码强制（2026-07-08 用户拍板） ===
+# 凡涉及技术/项目/偏好的「写入」命令（memory add / longterm ingest / auto-store），
+# 必须先执行过 memory search（任务窗口内）。未满足则拦截（exit 2），--force 显式豁免并审计。
+HARDSTEP_STATE_FILE = os.path.join(DEFAULT_DATA_DIR, ".hardstep.json")
+HARDSTEP_WINDOW_SECONDS = 30 * 60  # 30 分钟任务窗口：窗口内多次写入免重复检索
+
+
+def _hardstep_load():
+    """读取硬步骤状态文件（best-effort）。"""
+    try:
+        if os.path.exists(HARDSTEP_STATE_FILE):
+            with open(HARDSTEP_STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _hardstep_save(state):
+    """写入硬步骤状态文件（best-effort，确保数据目录存在）。"""
+    try:
+        os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
+        with open(HARDSTEP_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def mark_search_done():
+    """记录一次 memory search，使后续写入命令通过硬步骤校验。"""
+    state = _hardstep_load()
+    state["last_search_ts"] = time.time()
+    _hardstep_save(state)
+
+
+def enforce_hard_step_guard(force):
+    """拦截未先检索的写入命令。force=True 时显式豁免并记录审计。"""
+    if force:
+        state = _hardstep_load()
+        overrides = state.get("overrides") or []
+        overrides.append(time.time())
+        state["overrides"] = overrides
+        _hardstep_save(state)
+        print("⚠️ [HARD-STEP OVERRIDE] 已用 --force 跳过「先检索后入库」强制校验（已写入审计）。",
+              file=sys.stderr)
+        return
+
+    state = _hardstep_load()
+    last = state.get("last_search_ts")
+    satisfied = last is not None and (time.time() - last) <= HARDSTEP_WINDOW_SECONDS
+    if satisfied:
+        return
+
+    elapsed = int(time.time() - last) if last else None
+    msg = (
+        "\n⛔ [超脑硬步骤校验失败] 入库前必须先执行记忆检索。\n"
+        "────────────────────────────────────────────────────────────\n"
+        "依据 pre-commit 级硬步骤约定（2026-07-08）：凡涉及技术 / 项目 / 偏好的写入，\n"
+        "必须先运行一次 `SB memory search \"<主题>\"` 召回相关记忆。\n\n"
+        "解决方式（任选其一）：\n"
+        "  1) 先运行：SB memory search \"<相关主题>\"\n"
+        "  2) 显式豁免：在原命令后加 --force\n"
+        "     （--force 会被审计记录，仅用于自动化 / 明确豁免场景）\n"
+    )
+    if last:
+        msg += (f"\n  诊断：上次检索在 {elapsed} 秒前，已超过 "
+                f"{HARDSTEP_WINDOW_SECONDS}s 任务窗口。\n")
+    else:
+        msg += "\n  诊断：本机从未记录到 memory search（无检索状态）。\n"
+    msg += "────────────────────────────────────────────────────────────\n"
+    print(msg, file=sys.stderr)
+    sys.exit(2)
+
+
 def cmd_init(args):
     """Initialize SuperBrain data directory and default workspace."""
     ensure_workspace("default")
@@ -152,6 +227,7 @@ def cmd_init(args):
 
 def cmd_memory_add(args):
     """Add a new memory. v2.1.0: supports --valid-from/--valid-until/--replaces."""
+    enforce_hard_step_guard(args.force)  # v3.7.1: pre-commit 硬步骤
     attrs = {}
     if args.category:
         attrs["category"] = args.category
@@ -205,6 +281,7 @@ def cmd_memory_get(args):
 def cmd_memory_search(args):
     """Search memories."""
     results = search(args.query, limit=args.limit)
+    mark_search_done()  # v3.7.1: 记录检索，满足硬步骤校验
     if not results:
         print("No matching memories found.")
         return
@@ -769,6 +846,7 @@ def cmd_trace_export(args):
 
 def cmd_memory_auto_store(args):
     """Auto-store important information from text."""
+    enforce_hard_step_guard(args.force)  # v3.7.1: pre-commit 硬步骤
     result = auto_store(args.text, source_session=args.source, workspace=args.workspace)
     print_json(result)
 
@@ -920,6 +998,7 @@ def cmd_context_stats(args):
 
 def cmd_longterm_ingest(args):
     """Auto-ingest: dialogue as storage."""
+    enforce_hard_step_guard(args.force)  # v3.7.1: pre-commit 硬步骤
     result = auto_ingest(args.text, source_session=args.source, workspace=args.workspace)
     print_json(result)
 
@@ -1139,6 +1218,8 @@ def build_parser():
     sp.add_argument("--valid-from", help="Temporal: when this fact became true (ISO date, e.g. 2023-01-01) (v2.1.0)")
     sp.add_argument("--valid-until", help="Temporal: when this fact ceased to be true (ISO date) (v2.1.0)")
     sp.add_argument("--replaces", help="Memory ID this one supersedes (v2.1.0)")
+    sp.add_argument("--force", action="store_true",
+                    help="v3.7.1: 跳过「先检索后入库」硬步骤校验（会写审计，仅用于自动化/明确豁免）")
     sp.set_defaults(func=cmd_memory_add)
 
     # memory list
@@ -1373,6 +1454,8 @@ def build_parser():
     sp.add_argument("--text", required=True, help="Text to extract and store")
     sp.add_argument("--source", help="Source session identifier")
     sp.add_argument("--workspace", help="Workspace name")
+    sp.add_argument("--force", action="store_true",
+                    help="v3.7.1: 跳过「先检索后入库」硬步骤校验（会写审计，仅用于自动化/明确豁免）")
     sp.set_defaults(func=cmd_memory_auto_store)
 
     # memory correct
@@ -1603,6 +1686,8 @@ def build_parser():
     sp.add_argument("--text", required=True, help="Text to ingest")
     sp.add_argument("--source", help="Source session identifier")
     sp.add_argument("--workspace", help="Workspace name")
+    sp.add_argument("--force", action="store_true",
+                    help="v3.7.1: 跳过「先检索后入库」硬步骤校验（会写审计，仅用于自动化/明确豁免）")
     sp.set_defaults(func=cmd_longterm_ingest)
 
     sp = longterm_sub.add_parser("index", help="Build retrieval index")

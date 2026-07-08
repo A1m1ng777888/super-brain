@@ -1,5 +1,39 @@
 # Changelog — Super Brain 超脑
 
+## v3.7.1 (2026-07-08)
+
+### 新增：先检索后入库·代码级强制（pre-commit 硬步骤）
+
+把「对话即入库」从 SKILL.md 文档约定升级为 `superbrain.py` 的代码拦截。
+
+- `superbrain.py` 新增 `enforce_hard_step_guard(force)` + `mark_search_done()`：
+  - 状态文件 `DEFAULT_DATA_DIR/.hardstep.json` 记录 `last_search_ts` 与 `overrides[]`
+  - `memory add` / `longterm ingest` / `memory auto-store` 三个写入命令入口接入校验
+  - 窗口常量 `HARDSTEP_WINDOW_SECONDS = 30 * 60`（30 分钟任务窗口）
+- 未满足「窗口内做过 `memory search`」则 `sys.exit(2)` 拦截，诊断区分"从未检索" / "窗口过期"
+- 三命令各加 `--force`：跳过校验并打印告警，时间戳写入 `overrides[]` 审计数组（仅用于自动化 / 明确豁免）
+- `memory search` 成功后写 `last_search_ts`，解锁后续写入
+- 状态文件读写 best-effort，异常不影响正常入库
+
+### 测试
+- 三路径功能验证全过：① 无检索直接写入 → exit 2 拦截；② 检索后写入 → 正常；③ `--force` → 豁免 + 审计落盘
+- 验证中自身入库命令被新校验拦下，先 search 再 add 通过——闭环确认生效
+
+### 背景
+- v3.7.0（2026-07-08）落地「对话即入库」文档级硬步骤约定；本版本将其升级为代码强制（用户拍板「需要强制」）
+
+---
+
+## v3.7.0 (2026-07-08)
+
+### 变更：Karpathy 认知 OS 五条蒸馏全落地（详见发布级 CHANGELOG v3.7.0 条目）
+- 尾部可靠性门控（自检 9→12 项，新增 3 个门控极端场景检查：salience 边界/demote 持久性/工作空间溢出保护）
+- 幽灵标注（provenance 字段 + compute_provenance()，入库即标，get_context 输出带来源标签）
+- 套装固化（sb_gating.py 审计日志 _audit_log()/rollback()/explain() + gating audit/rollback/explain CLI）
+- 构建即理解校验（sb_longterm.py comprehension_check()，ingest 入库前独立复述校验）
+- 能力感知路由（新建 sb_capability.py，8 项能力画像+能力检查+编排器集成，capability list/check/update CLI）
+- 49/49 回归测试全通过
+
 ## v3.6.1 (2026-07-08)
 
 ### 变更：门控层自动接线（GWT 选择性原则落地 ingest 主干）

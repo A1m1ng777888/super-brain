@@ -1,5 +1,25 @@
 # Changelog — Super Brain 超脑
 
+## v3.7.1 (2026-07-08)
+
+### 新增 — 先检索后入库·代码级强制（pre-commit 硬步骤）
+把「对话即入库」从 SKILL.md 文档约定升级为 `superbrain.py` 的代码拦截。
+
+- `superbrain.py` 新增 `enforce_hard_step_guard(force)` + `mark_search_done()`
+- 状态文件 `DEFAULT_DATA_DIR/.hardstep.json` 记录 `last_search_ts` 与 `overrides[]`
+- `memory add` / `longterm ingest` / `memory auto-store` 三个写入命令入口接入校验
+- 窗口常量 `HARDSTEP_WINDOW_SECONDS = 30 * 60`（30 分钟任务窗口）
+- 未满足「窗口内做过 `memory search`」则 `sys.exit(2)` 拦截，诊断区分"从未检索" / "窗口过期"
+- 三命令各加 `--force`：跳过校验并打印告警，时间戳写入 `overrides[]` 审计数组（仅用于自动化 / 明确豁免）
+- `memory search` 成功后写 `last_search_ts`，解锁后续写入
+
+### 测试
+- 三路径功能验证全过：① 无检索直接写入 → exit 2 拦截；② 检索后写入 → 正常；③ `--force` → 豁免 + 审计落盘
+- 验证中自身入库命令被新校验拦下，先 search 再 add 通过——闭环确认生效
+
+### 安全
+- Phase 1 安全审查通过：无个人绝对路径 / 邮箱 / 手机号泄露，Copyright / Author 署名完备
+
 ## v3.7.0 (2026-07-08)
 
 ### Karpathy 认知 OS 五条蒸馏全落地
