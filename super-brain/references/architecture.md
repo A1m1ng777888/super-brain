@@ -122,6 +122,16 @@
 
 ---
 
+### 2.2.x 门控层（全局工作空间，v3.6.0+）
+
+| 模块 | 文件 | 核心能力 | 关键技术 |
+|------|------|----------|----------|
+| 全局工作空间门控 | `sb_gating.py` | 冷存储/活跃工作空间两层分离、显著度晋升、链式点燃、容量上限、手动 override | 多信号 salience 加权、阈值门控、Ignition 链式广播 |
+
+> **v3.6.1 自动接线**：门控层在 `sb_memory.add_memory` 写盘前自动计算 `salience` 并判定 `workspace_promoted`，使 `memory add` / `longterm ingest` 入库即晋升（无需查询时惰性重算）。手动 `promote`/`demote` 通过 `gating_override` 字段持久化，查询时优先于显著度重算。
+
+---
+
 ### 2.3 关联层
 
 | 模块 | 文件 | 核心能力 | 关键技术 |

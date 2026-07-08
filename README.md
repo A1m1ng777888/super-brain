@@ -1,14 +1,16 @@
 # Super Brain (超脑) — AI Agent 认知增强系统
 
-[![Version](https://img.shields.io/badge/version-3.6.0-blue)](https://github.com/A1m1ng777888/super-brain)
+[![Version](https://img.shields.io/badge/version-3.6.1-blue)](https://github.com/A1m1ng777888/super-brain)
 [![Python](https://img.shields.io/badge/python-3.8+-green)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-74%20PASS-brightgreen)](super-brain/scripts/test_superbrain.py)
+[![Tests](https://img.shields.io/badge/tests-85%20PASS-brightgreen)](super-brain/scripts/test_superbrain.py)
 [![Architecture](https://img.shields.io/badge/architecture-5%E5%B1%8417%E6%A8%A1%E5%9D%97-orange)](super-brain/references/architecture.md)
 
 为 AI Agent 提供**持久记忆、知识图谱、语义搜索、自动推理、关联挖掘、对话即入库、分类管线、感知增强、子Agent编排**九大核心能力，构建从感知到执行编排的完整认知增强闭环。
 
 > **v3.6.0**：全局工作空间门控层（Global Workspace Gating）— 受 Anthropic《A Global Workspace in Language Models》(2026-07-06) 启发，记忆分冷存储与活跃工作空间两层，按显著度晋升、容量上限约束、链式点燃实现 Ignition；新增 `reasoning_intermediate` 类型与 `reason capture` 中间推理捕获；新增 `gating` 子命令与 `memory context --workspace-only`。25 项新测试 + 49 项回归全通过。
+>
+> **v3.6.1**：门控层自动接线（GWT 选择性原则落地 ingest 主干）— `add_memory` 写盘前自动计算显著度并判定晋升，使 `memory add` / `longterm ingest` 入库即晋升（无需查询时惰性重算）；修复手动 demote 被显著度重算覆盖失效（新增 `gating_override` 字段区分手动/自动）；36 项新测试 + 49 项回归全通过。
 >
 > **v3.5.0**：Token ROI 仪表盘全面升级（30天趋势图 + 负 ROI 诊断 + 交互式 HTML 看板）。
 >

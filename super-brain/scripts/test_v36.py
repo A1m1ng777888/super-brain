@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 SuperBrain v3.6.0 测试套件 — 全局工作空间门控层 + 中间推理捕获
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 =============================================================
 覆盖：
   T1 salience 单调性（confidence / recency / access / entanglement）
@@ -10,6 +12,7 @@ SuperBrain v3.6.0 测试套件 — 全局工作空间门控层 + 中间推理捕
   T4 get_active_workspace 子集 / 容量上限
   T5 memory context --workspace-only 选择性过滤
   T6 门控 CLI 处理函数可调用性
+  T7 v3.6.1 自动晋升（add_memory / longterm ingest 入库即晋升）+ demote 修复
 全程使用隔离的 "test" workspace，不触碰生产数据。
 """
 
@@ -22,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sb_core import ensure_workspace, read_memories, write_memories
 from sb_memory import add_memory, get_context, MEMORY_TYPES
 from sb_reasoning import capture_reasoning_chain
+from sb_longterm import auto_ingest
 from sb_gating import (
     compute_salience, chain_ignite, get_active_workspace,
     set_threshold, get_threshold, promote, demote, calibrate,
@@ -225,6 +229,54 @@ def test_gating_cli_functions():
     check("promote 可调用", res.get("promoted") in (True, False), str(res))
 
 
+# --- T7: v3.6.1 自动晋升 + demote 修复 -----------------------------------
+def test_auto_promotion_and_demote():
+    print("\n[T7] v3.6.1 自动晋升（入库即晋升）+ demote 修复")
+    reset_workspace()
+    set_threshold(0.5, workspace=WS)  # 高于新鲜记忆显著度下限，可区分高低置信
+
+    # --- T2: 入库即晋升（单点接 add_memory，覆盖 memory add / auto_store / longterm ingest）---
+    m_hi = add_memory(content="重要事实 关于 gwt 门控层", mem_type="fact",
+                      entity="gwt", confidence=0.95, workspace=WS)
+    m_lo = add_memory(content="弱事实 关于 gwt 冷存储", mem_type="fact",
+                      entity="gwt", confidence=0.1, workspace=WS)
+    check("高置信入库即晋升", m_hi["workspace_promoted"] is True,
+          str(m_hi["workspace_promoted"]))
+    check("低置信入库不晋升", m_lo["workspace_promoted"] is False,
+          str(m_lo["workspace_promoted"]))
+    check("salience 为真实显著度(非裸 confidence 占位)",
+          abs(m_hi["salience"] - compute_salience(m_hi, WS)) < 1e-9
+          and m_hi["salience"] != m_hi["confidence"],
+          f"salience={m_hi['salience']} conf={m_hi['confidence']}")
+    check("高置信 salience >= 阈值", m_hi["salience"] >= get_threshold(WS))
+    check("低置信 salience < 阈值", m_lo["salience"] < get_threshold(WS))
+
+    # --- longterm ingest 入口同样自动晋升 ---
+    res = auto_ingest(
+        "牛顿是经典力学的奠基人，提出了三大运动定律。这一发现改变了物理学。",
+        workspace=WS)
+    check("longterm ingest 有产物", len(res.get("stored", [])) >= 1, str(res)[:120])
+    ingested_ids = [s["id"] for s in res.get("stored", [])]
+    ingested_mems = [m for m in read_memories(WS) if m["id"] in ingested_ids]
+    check("ingest 产物 salience 已计算(=compute_salience，无占位残留)",
+          all(abs(m["salience"] - compute_salience(m, WS)) < 1e-9 for m in ingested_mems),
+          "存在未覆盖占位的记忆")
+    check("ingest 产物带 workspace_promoted 布尔标记",
+          all(isinstance(m.get("workspace_promoted"), bool) for m in ingested_mems))
+
+    # --- T4 修复：promote 低置信 -> demote -> 不应再出现（修复前 demote 被 salience 覆盖失效）---
+    promote(m_lo["id"], workspace=WS)
+    active_after_promote = [m["id"] for m in get_active_workspace(WS, cap=DEFAULT_CAP)]
+    check("promote 后低置信进入工作空间", m_lo["id"] in active_after_promote)
+    demote(m_lo["id"], workspace=WS)
+    active_after_demote = [m["id"] for m in get_active_workspace(WS, cap=DEFAULT_CAP)]
+    check("demote 修复：demote 后不再出现(修复前 bug 会返回 True)",
+          m_lo["id"] not in active_after_demote)
+    m_lo_after = [m for m in read_memories(WS) if m["id"] == m_lo["id"]][0]
+    check("demote 写入 gating_override='demote'",
+          m_lo_after.get("gating_override") == "demote")
+
+
 if __name__ == "__main__":
     ensure_workspace(WS)
 
@@ -234,6 +286,7 @@ if __name__ == "__main__":
     test_active_workspace()
     test_context_workspace_only()
     test_gating_cli_functions()
+    test_auto_promotion_and_demote()
 
     # 清理隔离 workspace（避免 rmtree，沙箱禁用；原地清空记忆）
     write_memories([], WS)

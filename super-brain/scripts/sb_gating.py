@@ -188,8 +188,14 @@ def get_active_workspace(workspace=None, cap=DEFAULT_CAP):
     active = [m for m in memories if m.get("status") == "active"]
     threshold = get_threshold(workspace)
 
+    # v3.6.1: gating_override 优先（手动 promote/demote 不被 salience 重算覆盖）
     for m in active:
-        if not m.get("workspace_promoted", False):
+        ov = m.get("gating_override")
+        if ov == "promote":
+            m["workspace_promoted"] = True
+        elif ov == "demote":
+            m["workspace_promoted"] = False
+        elif not m.get("workspace_promoted", False):
             m["workspace_promoted"] = compute_salience(m, workspace) >= threshold
 
     chain_promoted = set()
@@ -213,10 +219,11 @@ def get_active_workspace(workspace=None, cap=DEFAULT_CAP):
 
 # --- Manual override ------------------------------------------------------
 def promote(mem_id, workspace=None):
-    """Force-promote a single memory into the workspace."""
+    """Force-promote a single memory into the workspace (manual override)."""
     memories = read_memories(workspace)
     for m in memories:
         if m["id"] == mem_id and m.get("status") == "active":
+            m["gating_override"] = "promote"
             m["workspace_promoted"] = True
             m["salience"] = max(m.get("salience", 0.0), get_threshold(workspace))
             write_memories(memories, workspace)
@@ -225,10 +232,11 @@ def promote(mem_id, workspace=None):
 
 
 def demote(mem_id, workspace=None):
-    """Force-demote a single memory out of the workspace."""
+    """Force-demote a single memory out of the workspace (manual override)."""
     memories = read_memories(workspace)
     for m in memories:
         if m["id"] == mem_id:
+            m["gating_override"] = "demote"
             m["workspace_promoted"] = False
             write_memories(memories, workspace)
             return {"id": mem_id, "demoted": True}

@@ -1,5 +1,29 @@
 # Changelog — Super Brain 超脑
 
+## v3.6.1 (2026-07-08)
+
+### 变更：门控层自动接线（GWT 选择性原则落地 ingest 主干）
+把 v3.6.0 建好的门控层从"可手动治理"升级为"入库即自动运转"。
+
+- `sb_memory.py` 的 `add_memory` 写盘前调用 `compute_salience` + `is_promoted`：
+  - 单点接入即覆盖 `memory add` / `auto_store` / `longterm ingest` 全部入口
+  - 晋升（salience 跨阈值 → `workspace_promoted`）在**编码时发生**，而非查询时惰性重算
+- 新增 `gating_override` 字段（promote / demote / None）：
+  - 修复 v3.6.0 的 demote 失效——原 `get_active_workspace` 手动 demote 设的 `False`
+    会被显著度重算覆盖（demote 形同虚设）
+  - `promote` / `demote` 改为写入 `gating_override`，查询时优先于显著度重算
+- 链式点燃仍委托 `get_active_workspace` 查询时统一做，避免每条入库全量扫
+
+### 测试
+- `test_v36.py` 扩展至 36 项（新增 11 项自动晋升 + demote 修复用例）
+- 回归 `test_superbrain.py`：49/49 全通过
+
+### 修复
+- `get_active_workspace` 手动 demote 被显著度重算覆盖失效 —— 新增 `gating_override`
+  区分手动与自动判定
+
+---
+
 ## v3.6.0 (2026-07-08)
 
 ### 新增：全局工作空间门控层（Global Workspace Gating）

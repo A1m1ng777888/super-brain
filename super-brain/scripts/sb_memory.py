@@ -25,6 +25,8 @@ from sb_search import (
     ternary_hash, fuzzy_match, fuzzy_token_match, levenshtein_distance,
     tokenize
 )
+# v3.6.1: 接入 GWT 门控层（冷存储/活跃工作空间两层）。sb_gating 仅依赖 sb_core，无反向 import，单向安全。
+from sb_gating import compute_salience, is_promoted
 
 
 # Memory types
@@ -135,10 +137,11 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
         "valid_until": valid_until,
         "replaces": replaces,
         "replaced_by": None,
-        "salience": float(confidence),
+        "salience": float(confidence),  # 占位，下方接入门控层后覆盖为真实显著度
         "chain_id": None,
         "reasoning_role": None,
-        "workspace_promoted": False
+        "workspace_promoted": False,  # 占位，下方接入门控层后覆盖为真实晋升标记
+        "gating_override": None  # v3.6.1: 手动 promote/demote 标记（None/promote/demote）
     }
 
     # --- Temporal: update replaced_by on old memory (v2.1.0) ---
@@ -147,6 +150,12 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
             if old_mem["id"] == replaces:
                 old_mem["replaced_by"] = new_id
                 break
+
+    # v3.6.1: 入库即晋升（接 GWT 门控层的选择性原则）
+    # 单点接 add_memory 即覆盖 memory add / auto_store / longterm ingest 全部入口，
+    # 让晋升在编码时发生，而非等查询时惰性重算。
+    memory["salience"] = compute_salience(memory, workspace)
+    memory["workspace_promoted"] = is_promoted(memory, workspace)
 
     memories.append(memory)
     write_memories(memories, workspace)
