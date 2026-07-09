@@ -1,5 +1,17 @@
 # Changelog — Super Brain 超脑
 
+## v3.7.4 (2026-07-09)
+
+### 新增 — 未知发现协议 (Unknowns Discovery Protocol)
+- 借鉴 Anthropic Thariq Shihipar《A Field Guide to Fable: Finding Your Unknowns》(2026-07-03)，把「需求澄清」系统化接入超脑
+- 四类未知（Rumsfeld 四象限）：Known Knowns / Known Unknowns / **Unknown Knowns（最危险，隐性标准/编码习惯）** / Unknown Unknowns
+- 三阶段技术接入超脑现有能力：
+  - **Pre（动手前）**：Blindspot Pass 盲点审查（`memory search` + `entangle`）、Reverse Interview 反向采访（一次只问一个架构级关键问题）、References 参照锚点
+  - **During（执行中）**：Deviation Log 偏离说明——让猜测可见，不偷偷魔改
+  - **Post（收尾）**：Quiz 后置测验（复用 `sb_selfcheck`）——解释不清即藏有未发现的 unknown，回到 Pre 补全
+- **触发分档**：A 全仪式（新项目/陌生库/大改动/设计审美类）/ B 仅 Pre（中等已知框架任务）/ C 跳过（trivial）；拿不准优先升档，用户可口头覆盖
+- 与「前置编配评估协议」互补：先未知发现澄清边界，再编配评估决定执行形态
+
 ## v3.7.3 (2026-07-09)
 
 ### 修复 / 安全 — 发布前路径脱敏固化

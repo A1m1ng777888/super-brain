@@ -7,7 +7,7 @@ license: MIT
 description: "Super Brain 超脑认知增强技能 v3.7.3。Karpathy 认知 OS 蒸馏落地——全局工作空间门控层(GWT)、尾部可靠性自检(12项，+3门控极端场景)、幽灵标注(provenance标签)、审计日志+回滚+解释(套装固化)、构建即理解校验(comprehension_check)、能力感知路由(锯齿状智能)。基础功能：Goal Continuation续跑+前置评估始终在线+T2阶段感知自动触发。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance。v3.7.2 新增「先检索后入库」代码级强制：写入命令未先 search 则拦截，--force 可显式豁免并审计"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.7.3
+# Super Brain (超脑) — 认知增强技能 v3.7.4
 
 ## 概述
 
@@ -197,6 +197,45 @@ Super Brain 的 Obsidian 同步模块（v3.7.2）提供：
 - 所有子Agent并行执行，各自独立上下文
 - 完成后由主Agent收集各子Agent的精简结论
 - 汇总为最终答案，中间过程不展示
+
+## 未知发现协议 (Unknowns Discovery Protocol)（v3.7.4 新增）
+
+> 借鉴 Anthropic Thariq Shihipar《A Field Guide to Fable: Finding Your Unknowns》(2026-07-03)。核心隐喻：**prompt 是地图，真实疆域（代码库 / 项目上下文 / 你的隐性标准）才是地形，地图永远 ≠ 地形，二者之间的 gap 叫 unknowns（未知）；AI 每遇一个 unknown 就只能猜，猜错的累积是长任务跑偏的根因。**
+
+**四类未知（Rumsfeld 四象限，按危险度排序）：**
+
+| 类型 | 含义 | 超脑对应动作 |
+|------|------|------|
+| Known Knowns 已知熟知 | 已写进 prompt 的明确需求 | 已在地图内，无需处理 |
+| Known Unknowns 已知未知 | 你意识到没想好、要探索的部分 | `orchestrate assess` 显式标为待探索 |
+| **Unknown Knowns 未知熟知（最危险）** | 你太理所当然、不会写进 prompt，但 AI 不知道的隐性业务逻辑 / 编码习惯 / 审美标准 | 纠缠场拉取历史同类记忆作 anchor；主动反问「这里有没有你默认但没说的标准？」 |
+| Unknown Unknowns 未知未知 | 你和 AI 都没想到的盲点 / 潜藏 bug / 更好架构 | Blindspot Pass（见下）主动暴露 |
+
+**三阶段技术（与超脑能力映射）：**
+
+1. **Pre-implementation 动手前**
+   - **Blindspot Pass 盲点审查**：接到非平凡新任务时，先 `SB memory search` + `SB entangle mine` 扫描 brief 与已知上下文的落差，主动列出「我可能忽略的未知未知」，再问用户「接下来怎么更好提问」。
+   - **Reverse Interview 反向采访**：动手前**一次只问一个**架构级关键问题（一旦答案变了就改变底层方案的问题），把 Known / Unknown Unknowns 逐步搬进 Known Knowns；不一次抛出 5 个 trivial 问题。
+   - **References 参照锚点**：引用用户历史同类项目 / 记忆作为约束 anchor，把「说不清的品味」具象化。
+
+2. **During implementation 执行中**
+   - **Deviation Log 偏离说明**：执行中每遇边缘 case 逼我偏离原方案，选最保守备选，把改动记进 `implementation_notes`（或对话里的「偏离说明」栏）再继续——让猜测可见，不偷偷魔改。
+
+3. **Post-implementation 收尾**
+   - **Quiz 后置测验**：任务完成前，生成「本次到底改了什么 / 关键决策为何」的 explainer，并复用 `sb_selfcheck` 自检；若无法向用户清晰解释某改动，说明那里藏着一个未被发现的 unknown，回到 Pre 补全。
+
+**触发分档（细化一档，与 Simplicity First 护栏一致）：** 按任务体量 / 边界清晰度分三档，避免仪式拖死效率——
+
+| 档位 | 触发条件 | 启用动作 | 跳过动作 |
+|------|----------|----------|----------|
+| **A 全仪式** | 开新项目 / 陌生代码库 / 跨多文件大改动 / 设计审美类任务（隐性标准多） | Pre 全开（盲点审查 + 反向采访 + 参照锚点）+ During（偏离说明）+ Post（后置测验） | 无 |
+| **B 仅 Pre** | 中等任务、框架已知、需求基本清楚（如已知栈内的功能实现） | 仅 Pre：盲点审查 + 一次反向采访关键问题 | 跳过偏离说明 / 后置测验（除非执行中真撞偏离，临时开 During） |
+| **C 跳过** | trivial 改动：typo / 翻译 / 单文件小修 / 明确查询 | 仅常规入库，不跑协议 | 全跳过 |
+
+- **决策责任**：档位由 Agent 在任务开头用「前置编配评估」四问粗判；拿不准时**优先升档**（宁可多跑一次盲点审查，也不漏掉 Unknown Knowns）。
+- **用户覆盖**：用户可随时口头要求「这次走全仪式 / 这次跳过」，覆盖 Agent 的档位判定。
+
+**与前置编配评估协议的关系：** 本协议的 Pre 阶段是「前置编配评估协议」的**补充**而非替代——编配评估解决「要不要拆并行」，未知发现解决「需求边界清不清」。两者在新任务开头串联：先未知发现（澄清边界），再编配评估（决定执行形态）。
 
 ## 架构
 
@@ -497,6 +536,8 @@ v3.0.0 搜索引擎融合六个信号通道：
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.7.4** | **2026-07-09** | **未知发现协议（Unknowns Discovery Protocol）：** 借鉴 Anthropic Thariq Shihipar《A Field Guide to Fable: Finding Your Unknowns》，把「需求澄清」系统化接入超脑。覆盖四类未知（Rumsfeld 四象限）与三阶段技术——Pre(Blindspot Pass 盲点审查 + Reverse Interview 反向采访 + References 参照锚点)、During(Deviation Log 偏离说明，让猜测可见)、Post(Quiz 后置测验，复用 `sb_selfcheck`)。触发分档细化为 A 全仪式 / B 仅 Pre / C 跳过，拿不准优先升档，用户可口头覆盖。 |
+| **v3.7.3** | **2026-07-09** | **发布前路径脱敏固化 + 通用版向导 + 记忆级图谱随版发布：** 新增 `prepublish_strip_local_paths.py`（路径无关脱敏）、`references/obsidian-vault-template.md` 首次配置向导、图谱 `export_graph_as_canvas` 三类节点力导向。 |
 | **v3.7.2** | **2026-07-09** | **Obsidian 本地知识库升级（Phase B）：** ① 格式底座对齐 obsidian-markdown——元数据改为 callout 块（按类型分色）、正文加 `^sb-content` block reference，导出全面符合 Obsidian 风味 Markdown；② 安全护栏——新增 `safe_write_file` 受控封装（路径沙箱 + 拒绝 `..` 遍历 + 禁止写入 `.obsidian` 系统目录，仅 `open()` 直写不调 shell），替换全部裸写；③ 图谱可视化——新增 `export_graph_as_canvas` + `SB obsidian canvas` 子命令，将 `graph.json` 导出为 `知识图谱.canvas`（json-canvas），节点链对应 `.md`、边为关联。新增 `test_obsidian.py`（7 项测试全过）。 |
 | **v3.7.1** | **2026-07-08** | **先检索后入库·代码级强制：** `superbrain.py` 新增 `enforce_hard_step_guard()` + `mark_search_done()`，对 `memory add` / `longterm ingest` / `memory auto-store` 三个写入命令做拦截——未检测到「30 分钟窗口内做过 `memory search`」则 `exit 2` 拦截并打印诊断；三命令各加 `--force` 显式豁免（写入 `.hardstep.json` 的 `overrides[]` 审计）；`memory search` 成功后写 `last_search_ts`。状态文件 `DEFAULT_DATA_DIR/.hardstep.json`（best-effort）。功能验证拦截/放行/豁免三路径全过。 |
 | **v3.7.0** | **2026-07-08** | **Karpathy 认知 OS 五条蒸馏全落地：** ① 尾部可靠性门控——`sb_selfcheck.py` 新增 3 个门控极端场景自检项（salience_bounds/demote_integrity/flood_protection），自检总数 9→12，health_score 更新；② 幽灵标注——`sb_memory.py` 新增 PROVENANCE_LABELS + `compute_provenance()`，`add_memory` 入库即标，`get_context` 输出带来源标签（✅已验证/🧠推断/🔗推理步骤/❓未标注）；③ 套装固化——`sb_gating.py` 新增审计日志 `_audit_log()` / `rollback()` / `explain()` + `audit_log.json`，`gating audit/rollback/explain` CLI；④ 构建即理解校验——`sb_longterm.py` 新增 `comprehension_check()`，ingest 管�线入库前独立复述校验；⑤ 能力感知路由——新建 `sb_capability.py`（8 项能力画像+能力检查+编排器集成），`capability list/check/update` CLI。修复 `get_health_score` 重复循环 bug。49/49 回归全通过。 |
