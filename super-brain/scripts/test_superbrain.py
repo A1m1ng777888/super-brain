@@ -6,10 +6,17 @@ Author: A1m1ng777888
 import sys
 import os
 import json
+import tempfile
 
-# Add scripts to path
-SCRIPT_DIR = os.path.join(os.path.expanduser("~"), ".workbuddy", "skills", "super-brain", "scripts")
+# B2 修复 (2026-07-10): 测试隔离
+# 1. SCRIPT_DIR 用 __file__ 相对路径（不再硬编码 ~/.workbuddy/...，可在 CI/干净环境跑）
+# 2. 数据目录重定向到 temp（避免触碰 production 的 ~/.workbuddy/super-brain/）
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
+
+# B2: 重定向数据目录到 temp，sb_core.DEFAULT_DATA_DIR 会读这个环境变量
+os.environ.setdefault("SUPERBRAIN_DATA_DIR",
+                      os.path.join(tempfile.gettempdir(), "superbrain_test_data"))
 
 from sb_core import (ensure_workspace, write_memories, write_graph, load_config, save_config,
                      switch_workspace, list_workspaces)
@@ -38,6 +45,8 @@ def section(title):
 # === SETUP: Clean test workspace and switch into it ===
 section("Setup")
 _original_workspace = load_config().get("current_workspace", "default")
+# B2: 隔离到 temp 后，确保 default workspace 存在（首次跑 temp 目录没有）
+ensure_workspace("default")
 for ws in ["test"]:
     ensure_workspace(ws)
     write_memories([], ws)

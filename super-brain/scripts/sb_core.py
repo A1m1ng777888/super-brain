@@ -85,8 +85,12 @@ def get_timestamp():
 
 
 def generate_id(prefix="mem"):
-    """Generate a unique ID with prefix."""
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    """Generate a unique ID with prefix.
+
+    R16 修复 (2026-07-10): 改用 UTC，与 get_timestamp() 时区一致，
+    避免 ID 时间戳(本地)与 timestamp 字段(UTC)混淆。
+    """
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     short_uuid = uuid.uuid4().hex[:8]
     return f"{prefix}_{ts}_{short_uuid}"
 
@@ -110,11 +114,10 @@ def load_config():
 
 
 def save_config(config):
-    """Save config to file."""
+    """Save config to file (atomic via write_json)."""
     ensure_dir(DEFAULT_DATA_DIR)
     config_path = os.path.join(DEFAULT_DATA_DIR, "config.json")
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    write_json(config_path, config)  # B6: 统一走原子写
 
 
 def get_workspace_dir(workspace_name=None):
@@ -185,10 +188,16 @@ def read_json(path):
 
 
 def write_json(path, data):
-    """Write JSON file safely."""
+    """Write JSON file safely.
+
+    B6 修复 (2026-07-10): 原子写——先写 .tmp 再 os.replace，避免写入过程崩溃导致文件损坏。
+    os.replace 是跨平台原子操作 (Windows/Linux/macOS 均支持)，崩溃时 .tmp 残留但不污染原文件。
+    """
     ensure_dir(os.path.dirname(path))
-    with open(path, "w", encoding="utf-8") as f:
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)  # 原子重命名
 
 
 def read_memories(workspace=None):

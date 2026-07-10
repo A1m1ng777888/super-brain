@@ -159,28 +159,51 @@ def _hardstep_load():
 
 
 def _hardstep_save(state):
-    """写入硬步骤状态文件（best-effort，确保数据目录存在）。"""
+    """写入硬步骤状态文件。
+
+    R2 修复 (2026-07-10): 不再静默吞异常——返回 bool，失败时打印 stderr，
+    避免 mark_search_done 静默丢失导致后续写入被误拦截且无提示。
+    """
     try:
         os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
         with open(HARDSTEP_STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        print(f"⚠️ [HARD-STEP] 状态文件写入失败: {e}", file=sys.stderr)
+        return False
 
 
-def mark_search_done():
-    """记录一次 memory search，使后续写入命令通过硬步骤校验。"""
+def mark_search_done(query=""):
+    """记录一次 memory search，使后续写入命令通过硬步骤校验。
+
+    B4 修复 (2026-07-10): 记录查询内容 last_search_query，
+    供 enforce_hard_step_guard 做相关性校验（R1），避免 search"猫咪"后 add"Docker"也能通过。
+    """
     state = _hardstep_load()
     state["last_search_ts"] = time.time()
-    _hardstep_save(state)
+    state["last_search_query"] = (query or "")[:200]  # B4: 记录查询内容（截断防爆）
+    ok = _hardstep_save(state)  # R2: 检查返回值
+    if not ok:
+        print("⚠️ [HARD-STEP] mark_search_done 写入失败，后续写入可能被误拦截",
+              file=sys.stderr)
 
 
-def enforce_hard_step_guard(force):
-    """拦截未先检索的写入命令。force=True 时显式豁免并记录审计。"""
+def enforce_hard_step_guard(force, content="", command=""):
+    """拦截未先检索的写入命令。
+
+    B4/R1 修复 (2026-07-10): 满足时间窗口后，额外校验 last_search_query 与
+    即将写入 content 的语义相关性——低于阈值则警告（不拦截，避免误伤跨主题入库）。
+    R3 修复 (2026-07-10): force 豁免审计记录 command + content 摘要，而非仅时间戳。
+    """
     if force:
         state = _hardstep_load()
         overrides = state.get("overrides") or []
-        overrides.append(time.time())
+        overrides.append({  # R3: 记录命令+内容摘要，提升审计价值
+            "ts": time.time(),
+            "command": command or "unknown",
+            "content_preview": (content or "")[:100],
+        })
         state["overrides"] = overrides
         _hardstep_save(state)
         print("⚠️ [HARD-STEP OVERRIDE] 已用 --force 跳过「先检索后入库」强制校验（已写入审计）。",
@@ -191,6 +214,19 @@ def enforce_hard_step_guard(force):
     last = state.get("last_search_ts")
     satisfied = last is not None and (time.time() - last) <= HARDSTEP_WINDOW_SECONDS
     if satisfied:
+        # B4/R1: 相关性校验——检索主题与入库内容语义相关
+        last_query = state.get("last_search_query", "")
+        if content and last_query:
+            try:
+                from sb_search import ternary_hash, ternary_similarity
+                sim = ternary_similarity(ternary_hash(last_query), ternary_hash(content))
+                if sim < 0.05:  # 极低相关阈值——仅警告明显不相关，不拦截
+                    print(f"⚠️ [HARD-STEP 警告] 上次检索「{last_query[:40]}」与入库内容相关性低 (sim={sim:.3f})",
+                          file=sys.stderr)
+                    print("  建议先检索相关主题再入库；如确属不同主题，加 --force 豁免。",
+                          file=sys.stderr)
+            except Exception:
+                pass  # 相关性校验失败不阻塞主流程
         return
 
     elapsed = int(time.time() - last) if last else None
@@ -227,7 +263,7 @@ def cmd_init(args):
 
 def cmd_memory_add(args):
     """Add a new memory. v2.1.0: supports --valid-from/--valid-until/--replaces."""
-    enforce_hard_step_guard(args.force)  # v3.7.1: pre-commit 硬步骤
+    enforce_hard_step_guard(args.force, content=args.content, command="memory add")  # B4/R1/R3: 传内容+命令做相关性校验
     attrs = {}
     if args.category:
         attrs["category"] = args.category
@@ -281,7 +317,7 @@ def cmd_memory_get(args):
 def cmd_memory_search(args):
     """Search memories."""
     results = search(args.query, limit=args.limit)
-    mark_search_done()  # v3.7.1: 记录检索，满足硬步骤校验
+    mark_search_done(args.query)  # B4: 传查询内容，供 enforce_hard_step_guard 相关性校验
     if not results:
         print("No matching memories found.")
         return
@@ -846,7 +882,7 @@ def cmd_trace_export(args):
 
 def cmd_memory_auto_store(args):
     """Auto-store important information from text."""
-    enforce_hard_step_guard(args.force)  # v3.7.1: pre-commit 硬步骤
+    enforce_hard_step_guard(args.force, content=args.text, command="auto-store")  # B4/R1/R3: 传内容+命令
     result = auto_store(args.text, source_session=args.source, workspace=args.workspace)
     print_json(result)
 
@@ -998,7 +1034,7 @@ def cmd_context_stats(args):
 
 def cmd_longterm_ingest(args):
     """Auto-ingest: dialogue as storage."""
-    enforce_hard_step_guard(args.force)  # v3.7.1: pre-commit 硬步骤
+    enforce_hard_step_guard(args.force, content=args.text, command="longterm ingest")  # B4/R1/R3: 传内容+命令
     result = auto_ingest(args.text, source_session=args.source, workspace=args.workspace)
     print_json(result)
 

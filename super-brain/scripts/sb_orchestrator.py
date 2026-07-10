@@ -158,18 +158,20 @@ def assess_complexity(task_description, current_context_size=0, workspace=None):
     novel_keywords = _detect_novel_keywords(description, workspace)
     context_score = min(context_score + novel_keywords * 0.2, 1.0)
 
+    # R9 修复 (2026-07-10): 提前获取 profiles，缓存传给后续调用，避免重复解析 3 次
+    needed_profiles = _detect_needed_profiles(description)
+
     # ── Dimension 2: Task Independence ──
     # Score how parallelizable this task is
-    independence_score = _assess_independence(description)
+    independence_score = _assess_independence(description, _cached_profiles=needed_profiles)
 
     # ── Dimension 3: Tool Divergence ──
     # How different are the needed tools from default conversation tools?
-    needed_profiles = _detect_needed_profiles(description)
     divergence_score = min(len(needed_profiles) / 3.0, 1.0)
 
     # ── Dimension 4: Token Risk ──
     # Estimate if this task will overflow context
-    estimated_tokens = _estimate_task_tokens(description)
+    estimated_tokens = _estimate_task_tokens(description, _cached_profiles=needed_profiles)
     token_score = min(estimated_tokens / 30000, 1.0)
 
     # ── Compute composite ──
@@ -218,8 +220,10 @@ def assess_complexity(task_description, current_context_size=0, workspace=None):
             reasoning_parts.append(f"⚠️ 能力凹陷点: {', '.join(weak_caps)}")
             if cap_result.get("has_critical_warnings"):
                 reasoning_parts.append("存在严重能力不足，建议显式求助用户")
-    except Exception:
-        pass  # 能力检查失败不阻塞评估
+    except Exception as e:
+        # R6 修复 (2026-07-10): 记录 warning 而非静默吞，编排器可见能力检查失败
+        capability_warnings = [{"capability": "system", "warning": f"能力检查模块异常: {e}"}]
+        reasoning_parts.append(f"⚠️ 能力检查失败（已降级）: {e}")
 
     return {
         "score": round(composite, 3),
@@ -262,8 +266,10 @@ def _detect_novel_keywords(description, workspace=None):
         return 0.5
 
 
-def _assess_independence(description):
+def _assess_independence(description, _cached_profiles=None):
     """Score 0-1 how parallelizable the task is.
+
+    R9 修复 (2026-07-10): _cached_profiles 参数避免重复调用 _detect_needed_profiles。
 
     High independence: multiple subtopics, explicit parallel markers, list of items,
     OR implicit scope (single sentence describing a large multi-domain project).
@@ -303,7 +309,8 @@ def _assess_independence(description):
     # "搭建完整的电商网站" — one sentence, but it's frontend + backend + deploy.
 
     # Multi-profile boost: different profiles = different sub-agents
-    profiles = _detect_needed_profiles(description)
+    # R9: 用缓存避免重复解析
+    profiles = _cached_profiles if _cached_profiles is not None else _detect_needed_profiles(description)
     if len(profiles) >= 4:
         score += 0.25
     elif len(profiles) >= 3:
@@ -366,8 +373,10 @@ def _detect_needed_profiles(description):
     return profiles
 
 
-def _estimate_task_tokens(description):
+def _estimate_task_tokens(description, _cached_profiles=None):
     """Token estimate with domain-aware floor.
+
+    R9 修复 (2026-07-10): _cached_profiles 参数避免重复调用 _detect_needed_profiles。
 
     Text-length estimates are too conservative for single-sentence big tasks.
     "搭建完整的电商网站" is 8 chars but implies 15000+ tokens of work.
@@ -394,11 +403,11 @@ def _estimate_task_tokens(description):
     ]
     for pattern, floor in domain_keywords:
         if re.search(pattern, description):
-            domain_floor = floor
-            break
+            domain_floor = max(domain_floor, floor)  # B5 修复: 取最大值而非第一个匹配后 break
 
     # ── Profile-based multiplier ──
-    profiles = _detect_needed_profiles(description)
+    # R9: 用缓存避免重复解析
+    profiles = _cached_profiles if _cached_profiles is not None else _detect_needed_profiles(description)
     profile_count = len(profiles)
 
     # Base multiplier from activity type

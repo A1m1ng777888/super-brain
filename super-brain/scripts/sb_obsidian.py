@@ -562,26 +562,34 @@ def reverse_sync_from_obsidian(workspace=None, vault_path=None, dry_run=True):
         if not fm_match:
             continue
         
-        # Parse frontmatter
+        # Parse frontmatter (R14: 跳过空行/注释，strip 单引号)
         fm = {}
         for line in fm_match.group(1).split('\n'):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue  # R14: 跳过空行和 YAML 注释
             if ':' in line:
                 key, _, val = line.partition(':')
                 key = key.strip()
-                val = val.strip().strip('"')
+                val = val.strip().strip('"').strip("'")
                 fm[key] = val
-        
+
         mem_id = fm.get("sb_id", "")
         if not mem_id or mem_id not in id_map:
             continue
-        
+
         memory = id_map[mem_id]
         changed = {}
-        
-        # Sync confidence
+
+        # Sync confidence (R15: float 加异常保护，坏值跳过该字段)
         new_conf = fm.get("sb_confidence", "")
-        if new_conf and float(new_conf) != memory.get("confidence"):
-            changed["confidence"] = {"from": memory["confidence"], "to": float(new_conf)}
+        if new_conf:
+            try:
+                new_conf_float = float(new_conf)
+                if new_conf_float != memory.get("confidence"):
+                    changed["confidence"] = {"from": memory["confidence"], "to": new_conf_float}
+            except ValueError:
+                print(f"  ⚠ [obsidian] sb_confidence 值非法: {new_conf}，跳过该字段")
         
         # Sync status
         new_status = fm.get("sb_status", "")

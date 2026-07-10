@@ -53,6 +53,10 @@ def comprehension_check(original_text, extracted_content, workspace=None):
     """
     验证系统是否真正理解了待入库内容。
 
+    R7 局限性说明 (2026-07-10): 本校验基于"两次关键点提取的文本相似度"，
+    是近似校验而非真正的语义理解。若提取算法有系统偏差（如总取前两句），
+    可能伪通过。作为置信度调整的辅助信号，不作为唯一准入门槛。
+
     策略：
     1. 对原文独立做关键点提取（不参考已提取结果）
     2. 用三进制哈希 Jaccard 对比两次提取的相似度
@@ -64,6 +68,8 @@ def comprehension_check(original_text, extracted_content, workspace=None):
       - needs_verification → 理解失败，置信度打 5 折
     """
     # 过短文本跳过校验（1-2 个词不需要"理解"）
+    # R8 注释 (2026-07-10): <15 字符直接通过是设计选择——短决策（如"用 React 不用 Vue"）
+    # 不走理解校验，但会正常入库。如需校验短文本，可降低阈值或改用内容哈希比对。
     if len(original_text.strip()) < 15:
         return (True, 1.0, 1.0, None)
 

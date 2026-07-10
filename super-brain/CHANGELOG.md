@@ -1,6 +1,24 @@
 # Changelog — Super Brain 超脑
 
-## v3.7.4 (2026-07-09)
+## v3.7.5 (2026-07-10)
+
+### 修复 — 运行级审计驱动 22 项修复
+- **原子写入**：`write_json`/`save_config` 改为 tmp+os.replace 原子写入，防崩溃致数据损坏
+- **测试隔离**：`test_superbrain.py` SCRIPT_DIR 改用 `__file__` 相对路径，数据目录重定向到 temp
+- **空检查**：`add_memory` 校验空 content 并报错
+- **硬步骤守卫增强**：传 query 到守卫做相关性校验；save 失败报 warning；force 审计记录命令信息
+- **search 副作用可选**：写副作用（access_count/update）可配置关闭
+- **过期校验格式**：日期比较统一为 `datetime` 对象，消除字符串字典序歧义
+- **replaces 时序修复**：new_id 在标记 superseded 前生成，消除时序隐患
+- **冲突检测**：新增 SimHash 内容相似度检测
+- **编排器**：`domain_floor` 取最大值而非首匹配；`capability` 异常打印 warning 而非静默吞；profile 缓存避免 3 次重复调用
+- **校验注释**：`comprehension_check` 标注局限性（文本相似度≠真正理解）
+- **自检**：索引重建失败记录到 `fix_errors`，不让 fixed 数虚高
+- **Obsidian**：frontmatter 解析增强（嵌套/转义/缺失 `sb_id`）；`float()` 异常保护
+- **SKILL.md**：未知发现协议标注——映射到已有 `memory search`/`entangle`/`selfcheck` 命令，为 Agent 行为指导而非独立 CLI
+
+### 测试
+- 254/254 全过，零回归
 
 ### 新增 — 未知发现协议 (Unknowns Discovery Protocol)
 - 借鉴 Anthropic Thariq Shihipar《A Field Guide to Fable: Finding Your Unknowns》(2026-07-03)，把「需求澄清」系统化接入超脑

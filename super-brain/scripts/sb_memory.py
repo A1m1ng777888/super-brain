@@ -102,6 +102,10 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
     if mem_type not in MEMORY_TYPES:
         raise ValueError(f"Invalid memory type: {mem_type}. Must be one of {MEMORY_TYPES}")
 
+    # B3 修复 (2026-07-10): 校验空 content，避免创建空记忆污染数据
+    if not content or not content.strip():
+        raise ValueError("content cannot be empty or whitespace-only")
+
     memories = read_memories(workspace)
     config = load_config()
 
@@ -112,18 +116,24 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
     if tags:
         default_attrs["tags"] = tags if isinstance(tags, list) else [tags]
 
+    # R10 修复 (2026-07-10): 提前生成 new_id + SimHash，供 replaces 和冲突检测使用
+    new_id = generate_id("mem")
+    full_text = f"{entity or ''} {content}"
+    sh = simhash(full_text, config.get("simhash_bits", 64))
+    th = ternary_hash(full_text, config.get("simhash_bits", 64))
+
     # --- Temporal: handle replaces (v2.1.0) ---
     if replaces:
         # Link to old memory — mark it superseded
         for old_mem in memories:
             if old_mem["id"] == replaces and old_mem.get("status") == "active":
                 old_mem["status"] = "superseded"
-                old_mem["replaced_by"] = generate_id("mem")  # placeholder, will update below
+                old_mem["replaced_by"] = new_id  # R10: 用真实 ID，不用 placeholder
                 break
 
-    # --- Temporal: conflict detection (v2.1.0) ---
+    # --- Temporal: conflict detection (v2.1.0) + R11 内容相似度 ---
     conflict = False
-    if config.get("temporal", {}).get("conflict_detection", True) and valid_from:
+    if config.get("temporal", {}).get("conflict_detection", True):
         entity_key = (entity or "general").lower()
         for existing in memories:
             if existing.get("entity", "").lower() != entity_key:
@@ -132,10 +142,22 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
                 continue
             if existing.get("status") not in ("active", "superseded"):
                 continue
+            # R11: 内容相似度检查（无论有无 valid_from，用 SimHash 防绕过）
+            try:
+                from sb_search import simhash_similarity
+                sim = simhash_similarity(sh, existing.get("simhash", 0))
+                if sim >= 0.85:
+                    if config.get("temporal", {}).get("conflict_overlap_warning", True):
+                        print(f"  ⚠ Near-duplicate content with memory {existing['id']} (sim={sim:.3f})")
+                        print(f"    Tip: use --replaces {existing['id']} if this supersedes the old fact.")
+                    conflict = True
+                    break
+            except Exception:
+                pass
+            # 时间重叠检查（需要双方都有 valid_from）
             ex_from = existing.get("valid_from")
-            if not ex_from:
+            if not ex_from or not valid_from:
                 continue
-            # Check for temporal overlap
             ex_until = existing.get("valid_until") or "9999-12-31"
             new_until = valid_until or "9999-12-31"
             if valid_from <= ex_until and new_until >= ex_from:
@@ -147,14 +169,7 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
                 conflict = True
                 break
 
-    # Generate SimHash for the content
-    full_text = f"{entity or ''} {content}"
-    sh = simhash(full_text, config.get("simhash_bits", 64))
-    
-    # v3.0.0: Generate ternary hash for enhanced discrimination
-    th = ternary_hash(full_text, config.get("simhash_bits", 64))
-
-    new_id = generate_id("mem")
+    # R10: SimHash/ternary_hash/new_id 已在上方提前生成
     memory = {
         "id": new_id,
         "timestamp": get_timestamp(),
@@ -181,12 +196,7 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
         "gating_override": None  # v3.6.1: 手动 promote/demote 标记（None/promote/demote）
     }
 
-    # --- Temporal: update replaced_by on old memory (v2.1.0) ---
-    if replaces:
-        for old_mem in memories:
-            if old_mem["id"] == replaces:
-                old_mem["replaced_by"] = new_id
-                break
+    # R10: replaced_by 已在上方 replaces 处理时一次性设置，无需二次更新
 
     # v3.6.1: 入库即晋升（接 GWT 门控层的选择性原则）
     # 单点接 add_memory 即覆盖 memory add / auto_store / longterm ingest 全部入口，
@@ -366,10 +376,12 @@ def merge_memories(id1, id2, workspace=None):
     return keeper
 
 
-def search(query, limit=10, workspace=None):
+def search(query, limit=10, workspace=None, update_access_stats=True):
     """
     Search memories using hybrid retrieval.
     v2.1.0: time-aware filtering — expired memories get slight score penalty.
+    R4 修复 (2026-07-10): update_access_stats 参数化写副作用，调用方可禁用。
+    R5 修复 (2026-07-10): 过期判断加日期格式校验，非 YYYY-MM-DD 不误判。
     Returns list of results with scores.
     """
     from datetime import datetime, timezone as tz
@@ -387,14 +399,23 @@ def search(query, limit=10, workspace=None):
     scored_results = []
     for mem, score, match_type in results:
         valid_until = mem.get("valid_until")
-        if valid_until and valid_until < now:
+        # R5: 格式校验——非 YYYY-MM-DD 不视为过期
+        if valid_until:
+            try:
+                datetime.strptime(valid_until[:10], "%Y-%m-%d")
+                is_expired = valid_until < now
+            except ValueError:
+                is_expired = False  # 格式不合法，不视为过期
+        else:
+            is_expired = False
+        if is_expired:
             # Expired — slight penalty, don't completely hide
             score = score * 0.85
         scored_results.append((mem, score, match_type))
     scored_results.sort(key=lambda x: x[1], reverse=True)
 
-    # Update access counts for returned memories
-    if scored_results:
+    # R4: 写副作用参数化——update_access_stats=False 时不更新 access_count
+    if update_access_stats and scored_results:
         all_memories = read_memories(workspace)
         result_ids = {r[0]["id"] for r in scored_results}
         now_ts = get_timestamp()
@@ -760,9 +781,10 @@ def anti_pollution_check(content, mem_type=None, confidence=0.0, workspace=None)
                 "increment_target": best_match["id"],
                 "similarity": round(best_sim, 3)
             }
-    except Exception:
-        pass  # If dedup fails, proceed with store
-    
+    except Exception as e:
+        # R13 修复 (2026-07-10): 记录 warning，但仍存储（可用性优先于去重）
+        print(f"  ⚠ [dedup] 去重检查失败，仍存储: {e}")
+
     return {"action": "store", "reason": "Passed all anti-pollution checks"}
 
 

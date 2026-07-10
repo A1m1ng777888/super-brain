@@ -599,8 +599,12 @@ def run_full_check(workspace=None, auto_fix=False):
                 from sb_longterm import build_index
                 build_index(workspace)
                 fixed += 1
-            except Exception:
-                pass
+            except Exception as e:
+                # R12 修复 (2026-07-10): 记录修复失败，不让 fixed 数虚高
+                results.setdefault("fix_errors", []).append(
+                    {"check": "index_integrity", "error": str(e)}
+                )
+                print(f"  ⚠ [selfcheck] 索引重建失败: {e}")
 
         # Logical: archive low-confidence stale, merge high-sim duplicates
         timeliness = results["checks"].get("timeliness", {})
