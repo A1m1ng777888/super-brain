@@ -634,7 +634,8 @@ def cmd_workspace_switch(args):
 
 
 def cmd_workspace_persona(args):
-    """v3.8.0: Configure or show persona workspace path."""
+    """v3.8.0: Configure or show persona workspace path.
+    v3.8.1: 首次使用检测——路径未配 + persona 为空时打印 onboarding 提示。"""
     from sb_core import get_persona_workspace_dir, read_persona_memories
     config = load_config()
 
@@ -678,6 +679,8 @@ def cmd_workspace_persona(args):
         print(f"  Memories: {len(mems)}")
         active = [m for m in mems if m.get("status") == "active"]
         print(f"  Active: {len(active)}")
+        # v3.8.1: 首次使用检测
+        _persona_onboarding_hint(config, mems)
     else:
         # 默认显示
         persona_path = config.get("persona_workspace_path")
@@ -687,6 +690,27 @@ def cmd_workspace_persona(args):
             print(f"Persona workspace path: (not set, using default)")
         mems = read_persona_memories()
         print(f"  Memories: {len(mems)}")
+        # v3.8.1: 首次使用检测
+        _persona_onboarding_hint(config, mems)
+
+
+def _persona_onboarding_hint(config, persona_mems):
+    """v3.8.1: 首次使用检测——路径未配 + persona 为空时打印 onboarding 提示。
+
+    触发条件：persona_workspace_path is None AND persona memories 为空。
+    这意味着用户从未配置过 persona workspace，也没有写入过 persona 记忆。
+    打印一段简短提示，引导用户（或 AI）参考 SKILL.md 的 onboarding 向导。
+    """
+    persona_path = config.get("persona_workspace_path")
+    if persona_path is None and len(persona_mems) == 0:
+        print()
+        print("  ℹ️  Persona workspace not configured yet.")
+        print("      This is where AI assistant's identity memories live (preferences, decisions, etc.)")
+        print("      Options:")
+        print("        1. Your local knowledge base:  SB workspace persona --path \"<your-vault>/super-brain-persona\"")
+        print("        2. Default location (no action needed): ~/.workbuddy/super-brain/workspaces/persona/")
+        print("        3. Custom path:  SB workspace persona --path \"<your-path>\"")
+        print("      See SKILL.md > 'Persona Workspace 首次配置向导' for details.")
 
 
 def cmd_stats(args):

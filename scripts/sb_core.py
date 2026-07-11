@@ -22,7 +22,7 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 
 # Default config
 DEFAULT_CONFIG = {
-    "version": "3.8.0",
+    "version": "3.8.1",
     "data_dir": DEFAULT_DATA_DIR,
     "current_workspace": "default",
     "persona_workspace_path": None,  # v3.8.0: persona 层路径，None 时用默认 workspaces/persona/
@@ -127,25 +127,30 @@ def resolve_workspace():
     解析链：
     1. os.getcwd() → 向上爬找 .workbuddy/ 目录
     2. 找到 → 取父目录名当 workspace 名（如 "my-project"）
+       - 排除用户主目录（~/.workbuddy 是平台全局配置，不是项目标记）
     3. workspace 不存在 → ensure_workspace() 自动建
-    4. 找不到 .workbuddy → fallback config.current_workspace → "default"
+    4. 找不到 .workbuddy（或只有主目录的）→ fallback config.current_workspace → "default"
 
     Returns:
         str: 解析出的 workspace 名
     """
-    cwd = os.getcwd()
-    current = Path(cwd)
+    home = Path.home()
+    cwd = Path(os.getcwd())
+    current = cwd
     # 向上爬，最多 10 层
     for _ in range(10):
         if (current / ".workbuddy").is_dir():
-            # 找到 .workbuddy 标记，取父目录名当 workspace 名
+            # 排除用户主目录——~/.workbuddy 是平台全局配置，不是项目标记
+            if current == home:
+                break
+            # 找到项目级 .workbuddy 标记，取父目录名当 workspace 名
             ws_name = current.name
             ensure_workspace(ws_name)
             return ws_name
         if current.parent == current:
             break  # 到根目录了
         current = current.parent
-    # 没找到 .workbuddy，fallback
+    # 没找到项目级 .workbuddy，fallback
     config = load_config()
     return config.get("current_workspace", "default")
 
