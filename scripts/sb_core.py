@@ -22,9 +22,10 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 
 # Default config
 DEFAULT_CONFIG = {
-    "version": "3.7.0",
+    "version": "3.8.0",
     "data_dir": DEFAULT_DATA_DIR,
     "current_workspace": "default",
+    "persona_workspace_path": None,  # v3.8.0: persona 层路径，None 时用默认 workspaces/persona/
     "simhash_bits": 64,
     "similarity_threshold": 0.65,
     "max_memories_per_load": 20,
@@ -120,11 +121,120 @@ def save_config(config):
     write_json(config_path, config)  # B6: 统一走原子写
 
 
+def resolve_workspace():
+    """v3.8.0: 从 cwd 向上找 .workbuddy 标记，解析项目 workspace 名。
+
+    解析链：
+    1. os.getcwd() → 向上爬找 .workbuddy/ 目录
+    2. 找到 → 取父目录名当 workspace 名（如 "my-project"）
+    3. workspace 不存在 → ensure_workspace() 自动建
+    4. 找不到 .workbuddy → fallback config.current_workspace → "default"
+
+    Returns:
+        str: 解析出的 workspace 名
+    """
+    cwd = os.getcwd()
+    current = Path(cwd)
+    # 向上爬，最多 10 层
+    for _ in range(10):
+        if (current / ".workbuddy").is_dir():
+            # 找到 .workbuddy 标记，取父目录名当 workspace 名
+            ws_name = current.name
+            ensure_workspace(ws_name)
+            return ws_name
+        if current.parent == current:
+            break  # 到根目录了
+        current = current.parent
+    # 没找到 .workbuddy，fallback
+    config = load_config()
+    return config.get("current_workspace", "default")
+
+
+def get_persona_workspace_dir():
+    """v3.8.0: 获取 persona workspace 目录（常驻身份记忆层）。
+
+    路径来源（优先级）：
+    1. config.persona_workspace_path（用户显式配置，绝对路径）
+    2. ~/.workbuddy/super-brain/workspaces/persona/（默认 fallback）
+
+    persona workspace 是跨项目常驻的——砚的身份记忆（60/40、分歧账本、
+    对外展示立场、阅读偏好等）存在这里，不随 cwd 切换而变。
+    对应 Freehold L1（始终自有的数据主权层）。
+
+    Returns:
+        str: persona workspace 的绝对路径
+    """
+    config = load_config()
+    persona_path = config.get("persona_workspace_path")
+    if persona_path:
+        # 用户显式配置了路径（如本地知识库下）
+        ensure_dir(persona_path)
+        # 确保数据文件存在
+        memories_path = os.path.join(persona_path, "memories.json")
+        graph_path = os.path.join(persona_path, "graph.json")
+        meta_path = os.path.join(persona_path, "meta.json")
+        if not os.path.exists(memories_path):
+            write_json(memories_path, [])
+        if not os.path.exists(graph_path):
+            write_json(graph_path, {"nodes": {}, "edges": {}})
+        if not os.path.exists(meta_path):
+            write_json(meta_path, {
+                "name": "persona",
+                "created_at": get_timestamp(),
+                "memory_count": 0,
+                "node_count": 0,
+                "edge_count": 0,
+                "last_self_check": None
+            })
+        return persona_path
+    # 默认 fallback：在标准 workspaces 目录下建 persona
+    data_dir = config.get("data_dir", DEFAULT_DATA_DIR)
+    return os.path.join(data_dir, "workspaces", "persona")
+
+
+def read_persona_memories():
+    """v3.8.0: 读取 persona workspace 的全部记忆。
+
+    用于双层召回——search()/get_context() 在搜 project workspace 后，
+    再搜 persona workspace，合并去重。
+
+    Returns:
+        list: persona 记忆列表，若 persona workspace 不存在或空则返回 []
+    """
+    persona_dir = get_persona_workspace_dir()
+    memories_path = os.path.join(persona_dir, "memories.json")
+    data = read_json(memories_path)
+    if data is None:
+        return []
+    return data
+
+
+def write_persona_memories(memories):
+    """v3.8.0: 写入 persona workspace 的记忆。
+
+    用于 --persona flag 的 memory add / longterm ingest。
+    """
+    persona_dir = get_persona_workspace_dir()
+    ensure_dir(persona_dir)
+    memories_path = os.path.join(persona_dir, "memories.json")
+    write_json(memories_path, memories)
+    # 更新 meta
+    meta_path = os.path.join(persona_dir, "meta.json")
+    meta = read_json(meta_path) or {}
+    meta["memory_count"] = len(memories)
+    write_json(meta_path, meta)
+
+
 def get_workspace_dir(workspace_name=None):
-    """Get workspace directory path."""
+    """Get workspace directory path.
+
+    v3.8.0 变更：workspace_name=None 时，从直接回退 config.current_workspace
+    改为先试 resolve_workspace()（cwd→.workbuddy 自动绑定），找不到再 fallback。
+    显式传入 workspace_name 时行为不变（向后兼容）。
+    """
     config = load_config()
     if workspace_name is None:
-        workspace_name = config.get("current_workspace", "default")
+        workspace_name = resolve_workspace()
     data_dir = config.get("data_dir", DEFAULT_DATA_DIR)
     return os.path.join(data_dir, "workspaces", workspace_name)
 

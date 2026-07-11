@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.7.5
-released: 2026-07-10
+version: v3.8.0
+released: 2026-07-11
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.7.5。Karpathy 认知 OS 蒸馏落地——全局工作空间门控层(GWT)、尾部可靠性自检(12项，+3门控极端场景)、幽灵标注(provenance标签)、审计日志+回滚+解释(套装固化)、构建即理解校验(comprehension_check)、能力感知路由(锯齿状智能)。基础功能：Goal Continuation续跑+前置评估始终在线+T2阶段感知自动触发。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance。v3.7.2 新增「先检索后入库」代码级强制：写入命令未先 search 则拦截，--force 可显式豁免并审计"
+description: "Super Brain 超脑认知增强技能 v3.8.0。v3.8.0 双层 Workspace 架构——persona 层（常驻身份记忆，跨项目始终加载）与 project 层（cwd 自动绑定）分离，--persona flag 显式写入身份层，search 双层合并召回（persona ×1.1 boost）。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。新增 resolve_workspace() cwd→.workbuddy 自动绑定，替代全局单激活开关。基础功能：Karpathy 认知 OS 蒸馏落地——GWT门控层、尾部可靠性自检12项、幽灵标注、审计日志+回滚+解释、构建即理解校验、能力感知路由。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance、persona"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.7.5
+# Super Brain (超脑) — 认知增强技能 v3.8.0
 
 ## 概述
 
@@ -458,6 +458,22 @@ v3.0.0 搜索引擎融合六个信号通道：
 | `capability check <cap_id>` | 查询单项能力的可靠性+降级策略 |
 | `capability update <cap_id> --score 0.X` | 更新能力评分或证据引用 |
 
+### v3.8.0 新增命令（双层 Workspace）
+
+| 命令 | 用途 |
+|------|------|
+| `workspace persona --path PATH` | 设置 persona workspace 路径（常驻身份记忆层） |
+| `workspace persona --show` | 查看当前 persona 配置与记忆数 |
+| `memory add ... --persona` | 写入 persona workspace 而非 project workspace |
+
+### v3.8.0 变更（双层 Workspace 架构）
+
+- **persona 层（常驻身份记忆）**：新增 `get_persona_workspace_dir()` / `read_persona_memories()` / `write_persona_memories()`。persona workspace 路径由 `config.persona_workspace_path` 指定（默认 `~/.workbuddy/super-brain/workspaces/persona/`）。
+- **cwd 自动绑定**：新增 `resolve_workspace()`，从 `os.getcwd()` 向上找 `.workbuddy` 标记，取父目录名当 workspace 名，自动 `ensure_workspace`。`get_workspace_dir(None)` 从回退 `config.current_workspace` 改为先试 cwd 解析。
+- **双层召回**：`search()` 在搜 project workspace 后，追加搜 persona workspace，persona 结果 ×1.1 boost，去重合并。
+- **`--persona` flag**：`memory add --persona` 写入 persona workspace。`add_memory()` 新增 `persona=False` 参数。
+- **向后兼容**：显式 `--workspace` 参数路径完全不变；`config.current_workspace` 降级为 cwd 解析不到时的 fallback。
+
 ### v3.7.1 变更（先检索后入库·代码强制）
 
 - **硬步骤代码强制**：`memory add` / `longterm ingest` / `memory auto-store` 三个写入命令执行前调用 `enforce_hard_step_guard()`，校验 `.hardstep.json` 的 `last_search_ts` 是否在 30 分钟窗口内；未满足则 `exit 2` 拦截并打印诊断（区分"从未检索" / "窗口过期"）。
@@ -538,6 +554,7 @@ v3.0.0 搜索引擎融合六个信号通道：
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.8.0** | **2026-07-11** | **双层 Workspace 架构（persona × project 分离）：** 新增 persona workspace（常驻身份记忆层）——AI 助手的身份记忆（偏好/决策/身份/跨项目事实）独立存储，不随 cwd 切换。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。① `sb_core.py` 新增 `resolve_workspace()`（cwd→.workbuddy 自动绑定，替代全局单激活开关）、`get_persona_workspace_dir()`、`read_persona_memories()`、`write_persona_memories()`；`get_workspace_dir()` 回退逻辑改为先试 cwd 解析；DEFAULT_CONFIG 新增 `persona_workspace_path` 字段。② `sb_memory.py` `search()` 双层合并召回（persona 结果 ×1.1 boost，去重）；`add_memory()` 新增 `persona=False` 参数，`persona=True` 时写入 persona workspace。③ `superbrain.py` 新增 `workspace persona --path/--show` CLI 子命令；`memory add` 新增 `--persona` flag。④ 通用版首次使用时通过 `workspace persona --path` 配置路径，默认 fallback 到 `~/.workbuddy/super-brain/workspaces/persona/`。49/49 回归全通过，零回归。 |
 | **v3.7.5** | **2026-07-10** | **审计驱动修复：** 运行级深度审计发现 6 确认 Bug + 16 疑似风险 + 13 未知盲区。22 项修复覆盖 9 文件：原子写入(B6)、测试隔离(B2)、空 content 检查(B3)、硬步骤相关性校验(B4/R1)与 save 报错(R2)与 force 审计增强(R3)、search 写副作用参数化(R4)、过期格式校验(R5)、replaces 时序修复(R10)、SimHash 冲突检测增强(R11)、dedup 失败记录(R13)、domain_floor 取最大值(B5)、capability 日志增强(R6)、profile 缓存(R9) 、comprehension_check 局限性注释(R7/R8)、selfcheck 索引失败记录(R12)、Obsidian frontmatter 解析增强(R14/R15)。SKILL.md 未知发现协议标注澄清(B1)。254/254 测试全过，零回归。 |
 | **v3.7.4** | **2026-07-09** | **未知发现协议（Unknowns Discovery Protocol）：** 借鉴 Anthropic Thariq Shihipar《A Field Guide to Fable: Finding Your Unknowns》，新增独立章节把「需求澄清」系统化接入超脑。覆盖四类未知（Rumsfeld 四象限）与三阶段技术——Pre(Blindspot Pass 盲点审查 + Reverse Interview 反向采访 + References 参照锚点，映射 `memory search`/`entangle`)、During(Deviation Log 偏离说明，让猜测可见)、Post(Quiz 后置测验，复用 `sb_selfcheck`)。与「前置编配评估协议」互补：先未知发现澄清边界，再编配评估决定执行形态。仅对非平凡任务启用，trivial 改动按 Simplicity First 跳过。触发条件于 2026-07-09 用户要求细化为一档三档：A 全仪式（新项目/陌生库/大改动/设计审美类）/ B 仅 Pre（中等已知框架任务）/ C 跳过（trivial），拿不准优先升档，用户可口头覆盖。 |
 | **v3.7.2** | **2026-07-09** | **Obsidian 本地知识库升级（Phase B）：** ① 格式底座对齐 obsidian-markdown——元数据改为 callout 块（按类型分色）、正文加 `^sb-content` block reference，导出全面符合 Obsidian 风味 Markdown；② 安全护栏——新增 `safe_write_file` 受控封装（路径沙箱 + 拒绝 `..` 遍历 + 禁止写入 `.obsidian` 系统目录，仅 `open()` 直写不调 shell），替换全部裸写；③ 图谱可视化——新增 `export_graph_as_canvas` + `SB obsidian canvas` 子命令，将 `graph.json` 导出为 `知识图谱.canvas`（json-canvas），节点链对应 `.md`、边为关联。新增 `test_obsidian.py`（7 项测试全过）。 |

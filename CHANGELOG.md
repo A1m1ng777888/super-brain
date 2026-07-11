@@ -1,40 +1,18 @@
 # Changelog — Super Brain 超脑
 
-## v3.7.5 (2026-07-10)
-
-### 修复 — 运行级审计驱动 22 项修复
-- **原子写入**：`write_json`/`save_config` 改为 tmp+os.replace 原子写入，防崩溃致数据损坏
-- **测试隔离**：`test_superbrain.py` SCRIPT_DIR 改用 `__file__` 相对路径，数据目录重定向到 temp
-- **空检查**：`add_memory` 校验空 content 并报错
-- **硬步骤守卫增强**：传 query 到守卫做相关性校验；save 失败报 warning；force 审计记录命令信息
-- **search 副作用可选**：写副作用（access_count/update）可配置关闭
-- **过期校验格式**：日期比较统一为 `datetime` 对象，消除字符串字典序歧义
-- **replaces 时序修复**：new_id 在标记 superseded 前生成，消除时序隐患
-- **冲突检测**：新增 SimHash 内容相似度检测
-- **编排器**：`domain_floor` 取最大值而非首匹配；`capability` 异常打印 warning 而非静默吞；profile 缓存避免 3 次重复调用
-- **校验注释**：`comprehension_check` 标注局限性（文本相似度≠真正理解）
-- **自检**：索引重建失败记录到 `fix_errors`，不让 fixed 数虚高
-- **Obsidian**：frontmatter 解析增强（嵌套/转义/缺失 `sb_id`）；`float()` 异常保护
-- **SKILL.md**：未知发现协议标注——映射到已有 `memory search`/`entangle`/`selfcheck` 命令，为 Agent 行为指导而非独立 CLI
-
-### 测试
-- 254/254 全过，零回归
-
-### 新增 — 未知发现协议 (Unknowns Discovery Protocol)
-- 借鉴 Anthropic Thariq Shihipar《A Field Guide to Fable: Finding Your Unknowns》(2026-07-03)，把「需求澄清」系统化接入超脑
-- 四类未知（Rumsfeld 四象限）：Known Knowns / Known Unknowns / **Unknown Knowns（最危险，隐性标准/编码习惯）** / Unknown Unknowns
-- 三阶段技术接入超脑现有能力：
-  - **Pre（动手前）**：Blindspot Pass 盲点审查（`memory search` + `entangle`）、Reverse Interview 反向采访（一次只问一个架构级关键问题）、References 参照锚点
-  - **During（执行中）**：Deviation Log 偏离说明——让猜测可见，不偷偷魔改
-  - **Post（收尾）**：Quiz 后置测验（复用 `sb_selfcheck`）——解释不清即藏有未发现的 unknown，回到 Pre 补全
-- **触发分档**：A 全仪式（新项目/陌生库/大改动/设计审美类）/ B 仅 Pre（中等已知框架任务）/ C 跳过（trivial）；拿不准优先升档，用户可口头覆盖
-- 与「前置编配评估协议」互补：先未知发现澄清边界，再编配评估决定执行形态
-
 ## v3.7.3 (2026-07-09)
 
 ### 修复 / 安全 — 发布前路径脱敏固化
-- 新增 `scripts/prepublish_strip_local_paths.py`：路径无关，发布前将硬编码 vault 路径还原为通用回退值 `~/ObsidianVault`；默认 dry-run 预览，`--apply` 才改写；只改 clone-temp 发布副本，绝不碰本地活代码
-- 本地版与通用版（GitHub clone）边界分清：本地保留硬编码主库开箱即用，通用版经脱敏后发布，可过 Phase 1 安全审查
+- 新增 `scripts/prepublish_strip_local_paths.py`：路径无关（自身不含任何个人路径），发布前将硬编码 vault 路径还原为通用回退值 `~/ObsidianVault`；默认 dry-run 预览，`--apply` 才改写；只改 clone-temp 发布副本，绝不碰本地活代码
+- 本地版与通用版（GitHub clone）边界彻底分清：本地版保留硬编码主库以获得开箱即用便利；通用版经脱敏脚本处理后发布，可过 Phase 1 安全审查（个人路径泄露拦截）
+
+### 新增 — 通用版首次配置向导 + 路径无关搭建模板
+- `SKILL.md` 新增「通用版首次配置向导」：使用者首次使用 Obsidian 同步时，一次对话内先问 Obsidian 安装位置 + 主仓库(vault)路径，再给 `references/obsidian-vault-template.md`
+- vault 路径决策权完全交给使用者；AI 只问、只提供模板，不替使用者定路径
+
+### 增强 — 记忆级知识图谱（v3.7.2 补强，随本版正式发布）
+- `export_graph_as_canvas` 重写为三类节点（实体 text / 主题 text / 记忆 file）+ 双组件力导向；主库实测 258 节点 / 194 边
+- 承接 v3.7.2 的 callout 格式、block reference、safe_write_file 安全护栏
 
 ## v3.7.2 (2026-07-09)
 
@@ -56,6 +34,7 @@
   - 初版：节点 = 记忆（`file` 节点链对应 `.md`）/ 实体（`text` 节点），边 = 关联关系，环形布局（无外部依赖）
   - **增强（同版本内）**：修复「图谱偏素、看不懂」——实体节点改为 `text` 节点并按**类别上色**（person/project/organization/tool/concept→Obsidian 预设色）、按**关联数自适应大小**（枢纽放大）、**力导向布局**（相连聚拢、无关节点分离，替代空圈）、边显示**关系类型标签**（uses/created/part_of/…）、左上角附**标题 + 类别图例**；新增 `_force_directed_layout` / `_node_size_by_degree` / `_first_nonempty_graph` 辅助函数与空图回退
   - `superbrain.py` 新增 `obsidian canvas` 子命令
+  - **记忆级图谱（补强）**：全部记忆也画进画布——每条记忆一个 `file` 节点（链对应 `.md`，按记忆 type 上色），按 `entity` 去重生成绿色主题节点，记忆→主题归属边使同主题记忆聚成「星系」环绕主题节点；双组件力导向（实体组件与记忆组件各自收敛后并排）。主库实测：258 节点（29 实体 + 52 主题 + 169 记忆 + 8 图例）/ 194 边（25 实体关系 + 169 记忆归属）
 
 ### 测试
 

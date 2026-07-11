@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sb_core import (
     generate_id, get_timestamp, read_memories, write_memories,
     read_graph, write_graph, update_meta, print_json, print_table,
-    ensure_workspace, load_config, read_json, write_json, get_workspace_dir
+    ensure_workspace, load_config, read_json, write_json, get_workspace_dir,
+    read_persona_memories, write_persona_memories, get_persona_workspace_dir
 )
 from sb_search import (
     simhash, search_memories, find_duplicates,
@@ -84,9 +85,13 @@ def compute_provenance(mem):
 
 def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
                source=None, attributes=None, tags=None, workspace=None,
-               valid_from=None, valid_until=None, replaces=None):
+               valid_from=None, valid_until=None, replaces=None,
+               persona=False):
     """
     Add a new memory to the store.
+    
+    v3.8.0: persona=True 时写入 persona workspace（常驻身份层）而非 project workspace。
+    用于存储砚的身份记忆（偏好/决策/身份/跨项目事实），不随 cwd 切换。
     
     Temporal parameters (v2.1.0):
         valid_from: ISO date string (e.g. "2023-01-01") — when this fact became true
@@ -106,7 +111,11 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
     if not content or not content.strip():
         raise ValueError("content cannot be empty or whitespace-only")
 
-    memories = read_memories(workspace)
+    # v3.8.0: persona 层走独立的读写路径
+    if persona:
+        memories = read_persona_memories()
+    else:
+        memories = read_memories(workspace)
     config = load_config()
 
     # Merge default attributes with provided ones
@@ -201,8 +210,10 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
     # v3.6.1: 入库即晋升（接 GWT 门控层的选择性原则）
     # 单点接 add_memory 即覆盖 memory add / auto_store / longterm ingest 全部入口，
     # 让晋升在编码时发生，而非等查询时惰性重算。
-    memory["salience"] = compute_salience(memory, workspace)
-    memory["workspace_promoted"] = is_promoted(memory, workspace)
+    # v3.8.0: persona 层的门控计算用 "persona" 当 workspace 名
+    effective_ws = "persona" if persona else workspace
+    memory["salience"] = compute_salience(memory, effective_ws)
+    memory["workspace_promoted"] = is_promoted(memory, effective_ws)
 
     # v3.7: provenance 自动标注 — 诚实区分验证过 vs 推断 vs 推理步骤
     provenance, provenance_source, _ = compute_provenance(memory)
@@ -210,19 +221,23 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
     memory["provenance_source"] = provenance_source
 
     memories.append(memory)
-    write_memories(memories, workspace)
+    # v3.8.0: persona 层走独立写入路径
+    if persona:
+        write_persona_memories(memories)
+    else:
+        write_memories(memories, workspace)
 
     # v3.7: audit trail — 记录自动入库+自动晋升
     if memory.get("workspace_promoted"):
         _audit_log("auto_promote", new_id,
                    f"Auto-promoted via ingest (salience={memory.get('salience', '?')})",
                    {"workspace_promoted": False}, {"workspace_promoted": True},
-                   reversible=True, workspace=workspace)
+                   reversible=True, workspace=effective_ws)
     else:
         _audit_log("auto_ingest", new_id,
                    f"Auto-ingested (salience={memory.get('salience', '?')} < threshold)",
                    {}, {"workspace_promoted": False},
-                   reversible=False, workspace=workspace)
+                   reversible=False, workspace=effective_ws)
 
     return memory
 
@@ -424,6 +439,24 @@ def search(query, limit=10, workspace=None, update_access_stats=True):
                 m["access_count"] = m.get("access_count", 0) + 1
                 m["last_accessed"] = now_ts
         write_memories(all_memories, workspace)
+
+    # v3.8.0: 双层召回——合并 persona workspace（常驻身份层）
+    # persona 记忆给 ×1.1 boost（身份层优先），去重后合并
+    persona_memories = read_persona_memories()
+    if persona_memories:
+        persona_active = [m for m in persona_memories if m.get("status") == "active"]
+        if persona_active:
+            persona_results = search_memories(query, persona_active, limit=limit,
+                                               similarity_threshold=threshold,
+                                               workspace="persona")
+            existing_ids = {r[0]["id"] for r in scored_results}
+            for mem, score, match_type in persona_results:
+                if mem["id"] not in existing_ids:
+                    # persona 层 boost: ×1.1，但不超过 1.0
+                    boosted_score = min(1.0, score * 1.1)
+                    scored_results.append((mem, boosted_score, f"persona_{match_type}"))
+                    existing_ids.add(mem["id"])
+            scored_results.sort(key=lambda x: x[1], reverse=True)
 
     return scored_results[:limit]
 

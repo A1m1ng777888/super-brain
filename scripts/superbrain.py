@@ -71,7 +71,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sb_core import (
     load_config, save_config, ensure_workspace, list_workspaces,
     switch_workspace, print_json, print_table, get_timestamp,
-    DEFAULT_DATA_DIR
+    DEFAULT_DATA_DIR, get_persona_workspace_dir,
+    read_persona_memories, write_persona_memories
 )
 from sb_memory import (
     add_memory, get_memory, list_memories, update_memory, delete_memory,
@@ -262,7 +263,8 @@ def cmd_init(args):
 
 
 def cmd_memory_add(args):
-    """Add a new memory. v2.1.0: supports --valid-from/--valid-until/--replaces."""
+    """Add a new memory. v2.1.0: supports --valid-from/--valid-until/--replaces.
+    v3.8.0: supports --persona flag to write to persona workspace."""
     enforce_hard_step_guard(args.force, content=args.content, command="memory add")  # B4/R1/R3: 传内容+命令做相关性校验
     attrs = {}
     if args.category:
@@ -282,9 +284,11 @@ def cmd_memory_add(args):
         tags=args.tags.split(",") if args.tags else None,
         valid_from=args.valid_from,      # v2.1.0
         valid_until=args.valid_until,    # v2.1.0
-        replaces=args.replaces           # v2.1.0
+        replaces=args.replaces,          # v2.1.0
+        persona=getattr(args, 'persona', False)  # v3.8.0
     )
-    print(f"Memory added: {memory['id']}")
+    layer = "persona" if getattr(args, 'persona', False) else "project"
+    print(f"Memory added [{layer}]: {memory['id']}")
     print_json(memory)
 
 
@@ -627,6 +631,62 @@ def cmd_workspace_switch(args):
     """Switch workspace."""
     switch_workspace(args.name)
     print(f"Switched to workspace: {args.name}")
+
+
+def cmd_workspace_persona(args):
+    """v3.8.0: Configure or show persona workspace path."""
+    from sb_core import get_persona_workspace_dir, read_persona_memories
+    config = load_config()
+
+    if args.path:
+        # 设置 persona workspace 路径
+        import os
+        path = os.path.abspath(args.path)
+        config["persona_workspace_path"] = path
+        save_config(config)
+        # 确保目录和数据文件存在
+        from sb_core import ensure_dir, write_json
+        ensure_dir(path)
+        mem_path = os.path.join(path, "memories.json")
+        graph_path = os.path.join(path, "graph.json")
+        meta_path = os.path.join(path, "meta.json")
+        if not os.path.exists(mem_path):
+            write_json(mem_path, [])
+        if not os.path.exists(graph_path):
+            write_json(graph_path, {"nodes": {}, "edges": {}})
+        if not os.path.exists(meta_path):
+            write_json(meta_path, {
+                "name": "persona",
+                "created_at": get_timestamp(),
+                "memory_count": 0,
+                "node_count": 0,
+                "edge_count": 0,
+                "last_self_check": None
+            })
+        print(f"Persona workspace path set to: {path}")
+        # 统计已有记忆数
+        mems = read_persona_memories()
+        print(f"  Memories: {len(mems)}")
+    elif args.show:
+        # 显示当前配置
+        persona_path = config.get("persona_workspace_path")
+        if persona_path:
+            print(f"Persona workspace path: {persona_path}")
+        else:
+            print(f"Persona workspace path: (not set, using default: {get_persona_workspace_dir()})")
+        mems = read_persona_memories()
+        print(f"  Memories: {len(mems)}")
+        active = [m for m in mems if m.get("status") == "active"]
+        print(f"  Active: {len(active)}")
+    else:
+        # 默认显示
+        persona_path = config.get("persona_workspace_path")
+        if persona_path:
+            print(f"Persona workspace path: {persona_path}")
+        else:
+            print(f"Persona workspace path: (not set, using default)")
+        mems = read_persona_memories()
+        print(f"  Memories: {len(mems)}")
 
 
 def cmd_stats(args):
@@ -1261,6 +1321,8 @@ def build_parser():
     sp.add_argument("--valid-from", help="Temporal: when this fact became true (ISO date, e.g. 2023-01-01) (v2.1.0)")
     sp.add_argument("--valid-until", help="Temporal: when this fact ceased to be true (ISO date) (v2.1.0)")
     sp.add_argument("--replaces", help="Memory ID this one supersedes (v2.1.0)")
+    sp.add_argument("--persona", action="store_true",
+                    help="v3.8.0: 写入 persona workspace（常驻身份层）而非 project workspace")
     sp.add_argument("--force", action="store_true",
                     help="v3.7.1: 跳过「先检索后入库」硬步骤校验（会写审计，仅用于自动化/明确豁免）")
     sp.set_defaults(func=cmd_memory_add)
@@ -1388,6 +1450,12 @@ def build_parser():
     sp = ws_sub.add_parser("switch", help="Switch workspace")
     sp.add_argument("--name", required=True, help="Workspace name")
     sp.set_defaults(func=cmd_workspace_switch)
+
+    # v3.8.0: workspace persona — 配置常驻身份记忆层
+    sp = ws_sub.add_parser("persona", help="v3.8.0: Configure persona workspace (常驻身份记忆层)")
+    sp.add_argument("--path", help="Set persona workspace path (absolute path)")
+    sp.add_argument("--show", action="store_true", help="Show current persona configuration")
+    sp.set_defaults(func=cmd_workspace_persona)
 
     # stats
     sp = subparsers.add_parser("stats", help="Show overall statistics")
