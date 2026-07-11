@@ -76,7 +76,39 @@ Super Brain 的 Obsidian 同步模块（v3.7.2）提供：
 - 路径决策权完全交给使用者；AI 只问、只提供模板，不替使用者定路径。
 - 发布前脱敏（已固化）：本地活代码保留硬编码主库以获得开箱即用便利；发布到 GitHub 前，对 clone-temp 副本运行 `scripts/prepublish_strip_local_paths.py --target-dir <clone-temp根目录> --apply`，自动将硬编码 vault 路径还原为 `~/ObsidianVault`（脚本路径无关、自身过 Phase 1，只改发布副本、不动本地）。推荐顺序：Phase 3 同步 → 跑此脚本 → Phase 1 审查 → 推送。
 
-### 请自主选择
+### Persona Workspace 首次配置向导（v3.8.0+）
+
+> 通用版（GitHub clone）首次使用 `--persona` 或发现 `persona_workspace_path` 未配置时触发。本地版（作者环境）已硬编码路径，自动跳过。
+
+Persona workspace 是 AI 助手的**常驻身份记忆层**——跨项目始终加载，不随 cwd 切换。通用版**不假设任何路径**，由使用者选择。
+
+**第 1 步 — 询问（必做）**
+
+用 `AskUserQuestion` 或对话询问一个信息：
+
+> **你想把 AI 助手的身份记忆（偏好/决策/身份等跨项目记忆）存在哪？**
+>
+> 1. **个人本地知识库下**（推荐）— 在你的知识库根目录下创建 `super-brain-persona/` 子目录，记忆与知识库放一起，便于备份和迁移
+> 2. **Super Brain 默认位置** — `~/.workbuddy/super-brain/workspaces/persona/`，与超脑其他数据放一起
+> 3. **自定义路径** — 你指定一个绝对路径
+
+**默认行为**：用户不做指示 → 走选项 1（个人本地知识库下）。若用户尚未配置 Obsidian vault 路径，则 fallback 到选项 2。
+
+**第 2 步 — 执行配置**
+
+根据用户选择执行：
+- **选项 1**：`SB workspace persona --path "<vault>/super-brain-persona"`（vault 路径取 Obsidian onboarding 已配置的 `OBSIDIAN_VAULT_PATH`，若未配置则问用户知识库根目录）
+- **选项 2**：不执行任何命令，`persona_workspace_path` 留 `None`，`get_persona_workspace_dir()` 自动 fallback 到默认路径
+- **选项 3**：`SB workspace persona --path "<用户指定路径>"`
+
+**第 3 步 — 验证**
+
+配置后跑 `SB workspace persona --show` 确认路径和记忆数（首次应为 0）。
+
+**关键约束**
+- 通用版代码里的 `DEFAULT_CONFIG["persona_workspace_path"]` 必须是 `None`（意为"未配置，用默认 fallback"），**严禁硬编码作者机器路径**——否则 Phase 1 安全审查会判定为个人路径泄露并拦截发布。
+- 路径决策权完全交给使用者；AI 只问、只执行，不替使用者定路径。
+- 本地版（作者环境）保留硬编码路径以获得开箱即用便利；发布前由 `prepublish_strip_local_paths.py` 自动还原。
 
 **选项 A：安装 Obsidian，获得完整体验**
 
