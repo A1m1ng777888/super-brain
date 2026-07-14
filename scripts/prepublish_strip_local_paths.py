@@ -54,7 +54,7 @@ VAULT_ASSIGN_RE = re.compile(
 # 绝对路径（盘符 + 斜杠），负向后行断言排除 https:// 等协议 URL。
 # 路径字符类显式列出（含中文 \u4e00-\u9fff），遇到空白/标点（; ； 。 ，等）即停，
 # 避免把后面的说明文字（如 OBSIDIAN_VAULT_PATH）一起吞掉。
-# 例：E:\foo  E:/foo  D:\bar  —— 但 https:// 中的 s:/ 不会被匹配
+# 例：某 Windows 盘符绝对路径（如 `X:\some\path`）；但 https:// 中的 s:/ 不会被匹配
 DRIVE_PATH_RE = re.compile(r'(?<![A-Za-z])[A-Za-z]:[\\/][\u4e00-\u9fffa-zA-Z0-9_./\\-]+')
 
 # 只处理这两个事实源文件

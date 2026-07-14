@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.8.1
-released: 2026-07-11
+version: v3.8.2
+released: 2026-07-14
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.8.1。v3.8.0 双层 Workspace 架构——persona 层（常驻身份记忆，跨项目始终加载）与 project 层（cwd 自动绑定）分离，--persona flag 显式写入身份层，search 双层合并召回（persona ×1.1 boost）。v3.8.1 新增 persona onboarding 首次使用检测——路径未配 + persona 为空时打印 onboarding 提示（代码级兜底，非纯文档约定）。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。基础功能：Karpathy 认知 OS 蒸馏落地——GWT门控层、尾部可靠性自检12项、幽灵标注、审计日志+回滚+解释、构建即理解校验、能力感知路由。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance、persona"
+description: "Super Brain 超脑认知增强技能 v3.8.2。v3.8.0 双层 Workspace 架构——persona 层（常驻身份记忆，跨项目始终加载）与 project 层（cwd 自动绑定）分离，--persona flag 显式写入身份层，search 双层合并召回（persona ×1.1 boost）。v3.8.1 新增 persona onboarding 首次使用检测——路径未配 + persona 为空时打印 onboarding 提示（代码级兜底，非纯文档约定）。v3.8.2 检索融合升级——收割 TencentDB-Agent-Memory 的 RRF 秩融合范式（Σ1/(K+rank) 替代 6 路手调权重求和）；新增 `graph mermaid` 命令将知识图谱导出为 Mermaid 图（TencentDB 符号化卸载轻量版）。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。基础功能：Karpathy 认知 OS 蒸馏落地——GWT门控层、尾部可靠性自检12项、幽灵标注、审计日志+回滚+解释、构建即理解校验、能力感知路由。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance、persona"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.8.1
+# Super Brain (超脑) — 认知增强技能 v3.8.2
 
 ## 概述
 
@@ -16,6 +16,8 @@ description: "Super Brain 超脑认知增强技能 v3.8.1。v3.8.0 双层 Worksp
 **v3.7.0 升级：Karpathy 认知 OS 五条蒸馏全落地。** 五路并行——① 尾部可靠性门控（自检 9→12 项，新增 3 个门控极端场景检查：salience 边界/demote 持久性/工作空间溢出保护）；② 幽灵标注（provenance 字段 + `compute_provenance()` 入库即标，`get_context()` 输出带标签：✅已验证/🧠推断/🔗推理步骤/❓未标注）；③ 套装固化（`sb_gating.py` 新增审计日志 `_audit_log()` + `rollback()` 回滚 + `explain()` 解释，`gating audit/rollback/explain` CLI）；④ 构建即理解校验（`sb_longterm.py` 新增 `comprehension_check()`，ingest 管�线入库前独立复述校验，未通过→降置信度+标待验证）；⑤ 能力感知路由（新建 `sb_capability.py`，8 项能力画像+能力检查+编排器集成，`capability list/check/update` CLI）。49/49 回归测试全通过。
 
 **v3.7.1 升级：先检索后入库·代码级强制。** 把「对话即入库」从文档约定升级为 `superbrain.py` 的代码拦截——`memory add` / `longterm ingest` / `memory auto-store` 三个写入命令执行前校验「30 分钟窗口内是否做过 `memory search`」，未满足则 `exit 2` 拦截；`--force` 可显式豁免并写入 `.hardstep.json` 审计。详见「命令参考 > v3.7.1 变更」。
+
+**v3.8.2 升级：检索融合 RRF 化 + 图谱 Mermaid 化。** ① 检索融合从 6 路手调权重求和改为 **RRF（Reciprocal Rank Fusion）**——Σ 1/(K+rank)（K=60），收割 TencentDB-Agent-Memory 的符号化范式，动态阈值按 RRF 量纲自适应；② 新增 `SB graph mermaid` 命令（`sb_mermaid.py`），把 `graph.json` 知识图谱导出为 Mermaid 图（节点按类别/type 上色、关系标签），是 TencentDB「符号化卸载」的轻量落地——让图谱可被任意 Markdown/渲染器消费。详见「命令参考 > v3.8.2 新增命令」。254/254 测试全过。
 
 所有数据本地存储（默认 `~/.workbuddy/super-brain/`），不依赖任何外部服务或 API。
 
@@ -458,6 +460,56 @@ v3.0.0 搜索引擎融合六个信号通道：
 | 模糊匹配 | 0.10 | 错别字容错 |
 | 字词网络扩展 | 0.08 | 关联词发现 |
 
+## 命令输入契约（声明式 input_schema）
+
+> 借鉴 DeerFlow 的 `input_schema` 设计：把"命令该填什么"从散文说明升级为结构化契约。
+> 目的：① 让 AI/使用者一眼看清必填与可选；② 漏填/填错类型在调用前即可被发现（文档级契约；代码级强制校验见末尾说明）。
+> 本部分为文档补丁，不单独 bump 版本号，随下次功能发布一并走版本。
+
+### `SB memory add` — 输入契约
+
+```yaml
+input_schema:
+  required:
+    - name: type
+      type: enum
+      values: [preference, decision, task, event, fact]
+      note: 记忆意图类型，决定分类与召回权重（优先级 preference>decision>task>event>fact）
+    - name: content
+      type: string
+      note: 记忆正文，一句话到一段
+  optional:
+    - name: entity
+      type: string
+      note: 关联实体（项目/人物/工具名），用于知识图谱
+    - name: confidence
+      type: float
+      range: [0.0, 1.0]
+      default: 0.9
+    - name: persona
+      type: flag
+      note: 写入 persona 层而非 project 层
+    - name: force
+      type: flag
+      note: 豁免硬步骤门控（写入 .hardstep.json 审计）
+```
+
+### `SB reason decide` — 输入契约
+
+```yaml
+input_schema:
+  required:
+    - name: options
+      type: json-array
+      note: 候选方案列表，必须为 JSON 数组字符串，如 '["方案A","方案B"]'
+  optional:
+    - name: context
+      type: string
+      note: 决策背景，提升推理质量（可选但建议填）
+```
+
+> **代码级校验说明**：当前契约为文档级，提升清晰度与 AI 调用确定性。若要升级为"程序强制拦截漏填/错类型"，需另写 validator 解析此 schema（类似 `enforce_hard_step_guard` 的扩展）。非紧急，按需再上。
+
 ## 命令参考
 
 ### v3.6.0 新增命令（全局工作空间门控层）
@@ -489,6 +541,14 @@ v3.0.0 搜索引擎融合六个信号通道：
 | `capability list` | 列出所有能力画像及可靠性评分 |
 | `capability check <cap_id>` | 查询单项能力的可靠性+降级策略 |
 | `capability update <cap_id> --score 0.X` | 更新能力评分或证据引用 |
+
+### v3.8.2 新增命令（RRF 检索融合 + graph mermaid）
+
+| 命令 | 用途 |
+|------|------|
+| `graph mermaid [--workspace NAME] [--direction LR\|TB]` | 把知识图谱导出为 Mermaid 图（节点按类别/type 上色、关系标签），可被任意 Markdown/渲染器消费（TencentDB 符号化卸载轻量版） |
+
+- **检索融合 RRF 化**：`search_memories()` 内部从 6 路手调权重求和改为 RRF（Σ1/(K+rank)，K=60），收割 TencentDB-Agent-Memory 的符号化范式；新增 `_signal_relevant()` 粗筛跳过纯噪声，动态阈值按 RRF 量纲自适应。召回质量对权重敏感度的依赖显著降低。
 
 ### v3.8.1 变更（Persona onboarding 代码级兜底）
 
@@ -585,15 +645,16 @@ v3.0.0 搜索引擎融合六个信号通道：
 4. **差异化衰减**：定义类长留，闲聊类快清，节省存储
 5. **对话即入库**：自动感知+提取+存储，零人工干预
 6. **零成本检索**：预计算索引，O(1) 查找，Token 节约
-7. **六通道融合**：TF-IDF + 关键词 + SimHash + 三进制 + 模糊 + 扩展
+7. **六通道信号 + RRF 秩融合**：TF-IDF + 关键词 + SimHash + 三进制 + 模糊 + 扩展 六路信号，按 Reciprocal Rank Fusion（Σ1/(K+rank)）融合，替代手调权重
 8. **向后兼容**：v1.0-v2.1 功能全部保留，旧记忆可搜索
 
 ## 版本历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.8.2** | **2026-07-14** | **检索融合 RRF 化 + 图谱 Mermaid 化：** ① 检索融合重构——弃用 6 路手调权重求和，改为 RRF（Reciprocal Rank Fusion，Σ1/(K+rank)，K=60），收割 TencentDB-Agent-Memory 符号化范式；新增 `_signal_relevant()` 粗筛（任一路信号达最低阈值才入候选）跳过纯噪声，动态阈值按 RRF 量纲自适应。② 新增 `graph mermaid` 命令（`sb_mermaid.py`）：把 `graph.json` 知识图谱导出为 Mermaid 图（实体/记忆节点按类别/type 上色、关系标签、方向可选 LR/TB），是 TencentDB「符号化卸载」的轻量落地。`SB graph mermaid [--workspace NAME] [--direction LR|TB]`。③ SKILL.md 新增「命令输入契约」声明式 input_schema 段。254/254 测试全过，零回归。 |
 | **v3.8.1** | **2026-07-11** | **Persona onboarding 代码级兜底：** `superbrain.py` 新增 `_persona_onboarding_hint()`——`workspace persona --show`（或无参数运行）时，检测 `persona_workspace_path is None` 且 persona memories 为空，则打印 onboarding 提示（三选项 + 指向 SKILL.md 向导章节）。将 persona onboarding 从纯文档约定升级为代码级提示，与 v3.7.1 硬步骤同哲学：用代码兜底而非靠纪律。 |
-| **v3.8.0** | **2026-07-11** | **双层 Workspace 架构（persona × project 分离）：** 新增 persona workspace（常驻身份记忆层）——AI 助手的身份记忆（偏好/决策/身份/跨项目事实）独立存储，不随 cwd 切换。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。① `sb_core.py` 新增 `resolve_workspace()`（cwd→.workbuddy 自动绑定，替代全局单激活开关）、`get_persona_workspace_dir()`、`read_persona_memories()`、`write_persona_memories()`；`get_workspace_dir()` 回退逻辑改为先试 cwd 解析；DEFAULT_CONFIG 新增 `persona_workspace_path` 字段。② `sb_memory.py` `search()` 双层合并召回（persona 结果 ×1.1 boost，去重）；`add_memory()` 新增 `persona=False` 参数，`persona=True` 时写入 persona workspace。③ `superbrain.py` 新增 `workspace persona --path/--show` CLI 子命令；`memory add` 新增 `--persona` flag。④ 通用版首次使用时通过 `workspace persona --path` 配置路径，默认 fallback 到 `~/.workbuddy/super-brain/workspaces/persona/`。49/49 回归全通过，零回归。 |
+| **v3.8.0** | **2026-07-11** | **双层 Workspace 架构（persona × project 分离）：** 新增 persona workspace（常驻身份记忆层）——砚的身份记忆（偏好/决策/身份/跨项目事实）独立存储，不随 cwd 切换。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。① `sb_core.py` 新增 `resolve_workspace()`（cwd→.workbuddy 自动绑定，替代全局单激活开关）、`get_persona_workspace_dir()`、`read_persona_memories()`、`write_persona_memories()`；`get_workspace_dir()` 回退逻辑改为先试 cwd 解析；DEFAULT_CONFIG 新增 `persona_workspace_path` 字段。② `sb_memory.py` `search()` 双层合并召回（persona 结果 ×1.1 boost，去重）；`add_memory()` 新增 `persona=False` 参数，`persona=True` 时写入 persona workspace。③ `superbrain.py` 新增 `workspace persona --path/--show` CLI 子命令；`memory add` 新增 `--persona` flag。④ 通用版首次使用时通过 `workspace persona --path` 配置路径，默认 fallback 到 `~/.workbuddy/super-brain/workspaces/persona/`。49/49 回归全通过，零回归。 |
 | **v3.7.5** | **2026-07-10** | **审计驱动修复：** 运行级深度审计发现 6 确认 Bug + 16 疑似风险 + 13 未知盲区。22 项修复覆盖 9 文件：原子写入(B6)、测试隔离(B2)、空 content 检查(B3)、硬步骤相关性校验(B4/R1)与 save 报错(R2)与 force 审计增强(R3)、search 写副作用参数化(R4)、过期格式校验(R5)、replaces 时序修复(R10)、SimHash 冲突检测增强(R11)、dedup 失败记录(R13)、domain_floor 取最大值(B5)、capability 日志增强(R6)、profile 缓存(R9) 、comprehension_check 局限性注释(R7/R8)、selfcheck 索引失败记录(R12)、Obsidian frontmatter 解析增强(R14/R15)。SKILL.md 未知发现协议标注澄清(B1)。254/254 测试全过，零回归。 |
 | **v3.7.4** | **2026-07-09** | **未知发现协议（Unknowns Discovery Protocol）：** 借鉴 Anthropic Thariq Shihipar《A Field Guide to Fable: Finding Your Unknowns》，新增独立章节把「需求澄清」系统化接入超脑。覆盖四类未知（Rumsfeld 四象限）与三阶段技术——Pre(Blindspot Pass 盲点审查 + Reverse Interview 反向采访 + References 参照锚点，映射 `memory search`/`entangle`)、During(Deviation Log 偏离说明，让猜测可见)、Post(Quiz 后置测验，复用 `sb_selfcheck`)。与「前置编配评估协议」互补：先未知发现澄清边界，再编配评估决定执行形态。仅对非平凡任务启用，trivial 改动按 Simplicity First 跳过。触发条件于 2026-07-09 用户要求细化为一档三档：A 全仪式（新项目/陌生库/大改动/设计审美类）/ B 仅 Pre（中等已知框架任务）/ C 跳过（trivial），拿不准优先升档，用户可口头覆盖。 |
 | **v3.7.2** | **2026-07-09** | **Obsidian 本地知识库升级（Phase B）：** ① 格式底座对齐 obsidian-markdown——元数据改为 callout 块（按类型分色）、正文加 `^sb-content` block reference，导出全面符合 Obsidian 风味 Markdown；② 安全护栏——新增 `safe_write_file` 受控封装（路径沙箱 + 拒绝 `..` 遍历 + 禁止写入 `.obsidian` 系统目录，仅 `open()` 直写不调 shell），替换全部裸写；③ 图谱可视化——新增 `export_graph_as_canvas` + `SB obsidian canvas` 子命令，将 `graph.json` 导出为 `知识图谱.canvas`（json-canvas），节点链对应 `.md`、边为关联。新增 `test_obsidian.py`（7 项测试全过）。 |

@@ -565,6 +565,12 @@ def cmd_graph_stats(args):
     print_json(stats)
 
 
+def cmd_graph_mermaid(args):
+    """Export the knowledge graph as a Mermaid diagram (v3.8.x)."""
+    from sb_mermaid import graph_to_mermaid
+    print(graph_to_mermaid(workspace=args.workspace, direction=args.direction))
+
+
 def cmd_selfcheck(args):
     """Run self-check."""
     result = run_full_check(auto_fix=args.fix)
@@ -1450,6 +1456,11 @@ def build_parser():
     # graph stats
     sp = graph_sub.add_parser("stats", help="Show graph statistics")
     sp.set_defaults(func=cmd_graph_stats)
+
+    sp = graph_sub.add_parser("mermaid", help="导出知识图谱为 Mermaid 图（v3.8.x）")
+    sp.add_argument("--workspace", default=None, help="工作空间名（默认当前）")
+    sp.add_argument("--direction", default="LR", help="布局方向 LR/TB")
+    sp.set_defaults(func=cmd_graph_mermaid)
 
     # selfcheck
     sp = subparsers.add_parser("selfcheck", help="Run self-diagnostics")

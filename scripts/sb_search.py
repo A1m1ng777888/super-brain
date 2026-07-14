@@ -482,6 +482,16 @@ def keyword_match_score(query_tokens, content_tokens):
     return len(overlap) / len(query_set) if query_set else 0.0
 
 
+def _signal_relevant(tfidf, kw, sh, th, fuzzy, expanded):
+    """粗筛：任一路信号达到最低相关阈值即视为候选。
+
+    替代原 search_memories 中 `combined >= 0.02` 的加权求和门槛，
+    使 RRF 融合前只保留"至少一路信号有反应"的记忆，跳过纯噪声。
+    """
+    return (tfidf > 0.08 or kw > 0.15 or sh > 0.5 or
+            th > 0.15 or fuzzy > 0.15 or expanded > 0.15)
+
+
 def search_memories(query, memories, limit=10, similarity_threshold=0.15,
                     dynamic_threshold=True, workspace=None):
     """
@@ -528,7 +538,7 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
     # Build corpus for TF-IDF
     all_docs = [tokenize(m.get("content", "")) for m in memories]
 
-    candidates = []
+    candidates_raw = []
     for i, memory in enumerate(memories):
         content = memory.get("content", "")
         entity = memory.get("entity", "")
@@ -559,44 +569,58 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
         # v3.0.0: 6. Expanded token match (word network)
         expanded_score = keyword_match_score(list(expanded_tokens), content_tokens) if len(expanded_tokens) > len(query_tokens) else 0
 
-        # Combined score with weights
-        # v3.0.0: rebalanced weights to incorporate ternary hash and fuzzy matching
-        combined = (0.35 * tfidf_score +
-                    0.20 * kw_score +
-                    0.15 * sh_score +
-                    0.12 * th_score +
-                    0.10 * fuzzy_score +
-                    0.08 * expanded_score)
+        # v3.8.x: 收割 TencentDB-Agent-Memory 的 RRF 秩融合范式。
+        # 不再用 6 路手调权重求和，改为收集信号、循环结束后按名次融合（见下方 RRF）。
+        # 粗筛：任一路信号达到最低相关阈值才进候选（等价于原 combined>=0.02 的"跳过垃圾"）。
+        if not _signal_relevant(tfidf_score, kw_score, sh_score, th_score, fuzzy_score, expanded_score):
+            continue
 
-        # v2.1.0: Coarse pre-filter — only skip absolute garbage
-        if combined >= 0.02:
-            # Determine match type
-            if fuzzy_score > 0.3 and kw_score < 0.3:
-                match_type = "fuzzy"  # v3.0.0: typo-tolerant match
-            elif kw_score > 0.5:
-                match_type = "keyword"
-            elif tfidf_score > 0.3:
-                match_type = "semantic"
-            elif th_score > 0.3:
-                match_type = "ternary"  # v3.0.0: ternary hash match
-            elif expanded_score > 0.3:
-                match_type = "expanded"  # v3.0.0: word network expansion
-            else:
-                match_type = "fuzzy"
+        # Determine match type（与原逻辑一致）
+        if fuzzy_score > 0.3 and kw_score < 0.3:
+            match_type = "fuzzy"  # v3.0.0: typo-tolerant match
+        elif kw_score > 0.5:
+            match_type = "keyword"
+        elif tfidf_score > 0.3:
+            match_type = "semantic"
+        elif th_score > 0.3:
+            match_type = "ternary"  # v3.0.0: ternary hash match
+        elif expanded_score > 0.3:
+            match_type = "expanded"  # v3.0.0: word network expansion
+        else:
+            match_type = "fuzzy"
 
-            candidates.append((memory, combined, match_type))
+        candidates_raw.append((memory, match_type,
+                              (tfidf_score, kw_score, sh_score, th_score, fuzzy_score, expanded_score)))
 
-    if not candidates:
+    if not candidates_raw:
         return []
 
-    # v2.1.0: Dynamic threshold from score distribution
+    # v3.8.x: RRF 融合（Reciprocal Rank Fusion），分数 = Σ 1/(K+rank)，K=60。
+    # 6 路信号各自排序取名次，按名次融合——免调权、免归一化，比手调权重更稳。
+    K = 60
+    n = len(candidates_raw)
+    rrf_scores = [0.0] * n
+    for s in range(6):
+        order = sorted(range(n), key=lambda i: candidates_raw[i][2][s], reverse=True)
+        rank = 1
+        prev_val = None
+        for pos, i in enumerate(order):
+            val = candidates_raw[i][2][s]
+            if prev_val is not None and val != prev_val:
+                rank = pos + 1
+            rrf_scores[i] += 1.0 / (K + rank)
+            prev_val = val
+
+    candidates = [(candidates_raw[i][0], rrf_scores[i], candidates_raw[i][1]) for i in range(n)]
+
+    # 动态阈值（RRF 量纲：满分 6/(K+1)≈0.098，典型相关 ≈0.05~0.09）
     if dynamic_threshold:
         top_score = max(c[1] for c in candidates)
-        # adaptive quality line: proportional to top score, bounded
-        dynamic_min = max(0.10, min(0.30, top_score * 0.5))
+        dynamic_min = max(0.02, min(0.07, top_score * 0.5))
         effective_threshold = dynamic_min
     else:
-        effective_threshold = similarity_threshold
+        # 非动态模式：把原 weighted-sum 量纲的阈值夹到 RRF 量纲范围内
+        effective_threshold = min(similarity_threshold, 0.07)
 
     # Filter and sort
     results = [(m, s, t) for m, s, t in candidates if s >= effective_threshold]

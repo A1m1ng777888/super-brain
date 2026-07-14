@@ -1,5 +1,41 @@
 # Changelog — Super Brain 超脑
 
+## v3.8.2 (2026-07-14)
+
+### 升级 — 检索融合 RRF 化 + 图谱 Mermaid 化
+- 检索融合重构：弃用 6 路手调权重求和，改为 **RRF（Reciprocal Rank Fusion，Σ1/(K+rank)，K=60）**，收割 TencentDB-Agent-Memory 的符号化范式；新增 `_signal_relevant()` 粗筛（任一路信号达最低阈值才入候选）跳过纯噪声，动态阈值按 RRF 量纲自适应
+- 新增 `graph mermaid` 命令（`sb_mermaid.py`）：把 `graph.json` 知识图谱导出为 Mermaid 图（实体/记忆节点按类别/type 上色、关系标签、方向可选 LR/TB），是 TencentDB「符号化卸载」的轻量落地——图谱可被任意 Markdown/渲染器消费
+- `SKILL.md` 新增「命令输入契约」声明式 input_schema 段（`memory add` / `reason decide` 等），提升 AI 调用确定性
+- 254/254 测试全过，零回归
+
+## v3.8.1 (2026-07-11)
+
+### 新增 — Persona onboarding 代码级兜底
+- `superbrain.py` 新增 `_persona_onboarding_hint()`：`workspace persona --show`（或无参数运行）时，检测 `persona_workspace_path is None` 且 persona memories 为空，则打印 onboarding 提示（三选项 + 指向 SKILL.md 向导章节）
+- 将 persona onboarding 从纯文档约定升级为代码级提示，与 v3.7.1 硬步骤同哲学：用代码兜底而非靠纪律
+
+## v3.8.0 (2026-07-11)
+
+### 新增 — 双层 Workspace 架构（persona × project 分离）
+- 新增 persona workspace（常驻身份记忆层）：AI 助手的身份记忆（偏好/决策/身份/跨项目事实）独立存储，不随 cwd 切换；对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）
+- `sb_core.py` 新增 `resolve_workspace()`（cwd→.workbuddy 自动绑定）、`get_persona_workspace_dir()` / `read_persona_memories()` / `write_persona_memories()`；`sb_memory.py` `search()` 双层合并召回（persona 结果 ×1.1 boost，去重）
+- `superbrain.py` 新增 `workspace persona --path/--show` CLI；`memory add` 新增 `--persona` flag
+- 49/49 回归全通过，零回归
+
+## v3.7.5 (2026-07-10)
+
+### 修复 — 审计驱动修复（22 项）
+- 运行级深度审计发现 6 确认 Bug + 16 疑似风险 + 13 未知盲区，22 项修复覆盖 9 文件：原子写入、测试隔离、空 content 检查、硬步骤相关性校验与 save 报错/force 审计增强、search 写副作用参数化、过期格式校验、replaces 时序修复、SimHash 冲突检测增强、dedup 失败记录、domain_floor 取最大值、capability 日志增强、profile 缓存、comprehension_check 局限性注释、selfcheck 索引失败记录、Obsidian frontmatter 解析增强
+- SKILL.md 未知发现协议标注澄清
+- 254/254 测试全过，零回归
+
+## v3.7.4 (2026-07-09)
+
+### 新增 — 未知发现协议（Unknowns Discovery Protocol）
+- 借鉴 Anthropic Thariq Shihipar《A Field Guide to Fable: Finding Your Unknowns》，新增独立章节把「需求澄清」系统化接入超脑
+- 覆盖四类未知（Rumsfeld 四象限）与三阶段技术——Pre（Blindspot Pass / Reverse Interview / References）、During（Deviation Log）、Post（Quiz 后置测验，复用 `sb_selfcheck`）
+- 与「前置编配评估协议」互补：先未知发现澄清边界，再编配评估决定执行形态；仅对非平凡任务启用，trivial 改动按 Simplicity First 跳过
+
 ## v3.7.3 (2026-07-09)
 
 ### 修复 / 安全 — 发布前路径脱敏固化
