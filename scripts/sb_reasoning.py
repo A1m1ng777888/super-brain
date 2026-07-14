@@ -247,6 +247,10 @@ def analyze_logic(text):
                 effect = m.group(1).strip()
             
             if cause and effect and len(cause) > 1 and len(effect) > 1:
+                # v3.9: 按连接词 split 去首段，剥离 CAUSE_PATTERNS 捕获组内嵌的脏连接词
+                _CONN_CLEAN = re.compile(r'因为|所以|由于|导致|引起|使得|因此|从而|but|however|although')
+                cause = _CONN_CLEAN.split(cause, maxsplit=1)[0].strip()
+                effect = _CONN_CLEAN.split(effect, maxsplit=1)[0].strip()
                 relationships.append({
                     "type": "cause_effect",
                     "cause": cause[:100],
@@ -450,9 +454,11 @@ def assist_decision(options, criteria=None, workspace=None):
         # Feasibility: check if there are known constraints
         feasibility = 0.7  # Default
         for mem, score, _ in results:
-            if any(w in mem.get("content", "").lower() for w in ["困难", "复杂", "问题", "风险", "difficult", "risk"]):
+            c = mem.get("content", "").lower()
+            # v3.9: 负向后行断言排除否定前缀（不/没/无/not），修复否定极性误判
+            if re.search(r'(?<![不没无])(?:困难|复杂|问题|风险)', c) or re.search(r'(?<!not )(?:difficult|risk)', c):
                 feasibility -= 0.1
-            if any(w in mem.get("content", "").lower() for w in ["简单", "容易", "可行", "simple", "easy", "feasible"]):
+            if re.search(r'(?<![不没无])(?:简单|容易|可行)', c) or re.search(r'(?<!not )(?:simple|easy|feasible)', c):
                 feasibility += 0.1
         scores["feasibility"] = max(0.1, min(1.0, feasibility))
         
@@ -467,7 +473,7 @@ def assist_decision(options, criteria=None, workspace=None):
             scores["alignment"] = 0.5  # Neutral if no existing knowledge
         
         # Weighted total
-        total = sum(scores.values()) / len(criteria)
+        total = sum(scores.values()) / len(scores)  # v3.9: 用 scores 长度替代 criteria 长度
         
         scored_options.append({
             "option": option,
@@ -535,23 +541,26 @@ def capture_reasoning_chain(text, source_id=None, workspace=None):
     chain_id = generate_id("chain")
     mems = []
     for p in points:
-        m = add_memory(
-            content=p["sentence"],
-            mem_type="reasoning_intermediate",
-            entity="reasoning",
-            confidence=0.6,
-            source="reasoning_capture",
-            attributes={
-                "chain_id": chain_id,
-                "reasoning_role": "intermediate",
-                "source_id": source_id,
-                "point_type": p["type"],
-                "logic_structure": logic.get("structure"),
-            },
-            tags=["reasoning-intermediate"],
-            workspace=workspace,
-        )
-        mems.append(m)
+        try:  # v3.9: 单节点失败不阻断整条链
+            m = add_memory(
+                content=p["sentence"],
+                mem_type="reasoning_intermediate",
+                entity="reasoning",
+                confidence=0.6,
+                source="reasoning_capture",
+                attributes={
+                    "chain_id": chain_id,
+                    "reasoning_role": "intermediate",
+                    "source_id": source_id,
+                    "point_type": p["type"],
+                    "logic_structure": logic.get("structure"),
+                },
+                tags=["reasoning-intermediate"],
+                workspace=workspace,
+            )
+            mems.append(m)
+        except Exception:
+            continue
 
     # Link chain nodes bidirectionally via related_nodes (entanglement signal
     # feeds salience; the chain is navigable as a unit for chain-ignition).

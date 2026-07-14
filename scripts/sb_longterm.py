@@ -370,7 +370,21 @@ def zero_cost_retrieve(query, workspace=None, limit=5):
     wn = get_word_network(workspace)
     if wn._total_docs == 0:
         build_word_network_from_memories(active, workspace)
-    
+
+    # v3.8.9: 用 build_index 产出的 keyword_index 做候选过滤（O(k) → reduced O(n)）
+    # 无索引时回退全扫；有索引时只在候选集中做 ternary 重排。
+    index_path = os.path.join(get_workspace_dir(workspace), "longterm_index.json")
+    idx = read_json(index_path)
+    ki = idx.get("keyword_index", {}) if idx else {}
+    if ki and query_tokens:
+        candidate_ids = set()
+        for t in query_tokens:
+            candidate_ids.update(ki.get(t, []))
+        if candidate_ids:
+            active = [m for m in active if m["id"] in candidate_ids]
+            if not active:
+                return {"memories": [], "summary": "No keyword-index matches found"}
+
     # Score each memory using ternary hash (O(1) per memory)
     scored = []
     for mem in active:
