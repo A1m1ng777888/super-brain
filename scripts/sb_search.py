@@ -529,11 +529,13 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
 
     # v3.0.0: Word network query expansion
     expanded_tokens = set(query_tokens)
+    base_token_count = len(expanded_tokens)          # 去重后基数，用于判断"扩展是否真发生"（修复 v3.8.3 的 set-vs-list 误判）
     wn = get_word_network(workspace)
     if wn._total_docs > 0:
         expansions = wn.expand_query(query, max_expansions=3, min_similarity=0.12)
         for exp_token, _ in expansions:
             expanded_tokens.add(exp_token)
+    has_expansion = len(expanded_tokens) > base_token_count   # set-vs-set：仅在确有新 token 加入时才点亮第六路信号
 
     # Build corpus for TF-IDF
     all_docs = [tokenize(m.get("content", "")) for m in memories]
@@ -567,7 +569,7 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
         fuzzy_score = fuzzy_token_match(query_tokens, content_tokens)
 
         # v3.0.0: 6. Expanded token match (word network)
-        expanded_score = keyword_match_score(list(expanded_tokens), content_tokens) if len(expanded_tokens) > len(query_tokens) else 0
+        expanded_score = keyword_match_score(list(expanded_tokens), content_tokens) if has_expansion else 0
 
         # v3.8.x: 收割 TencentDB-Agent-Memory 的 RRF 秩融合范式。
         # 不再用 6 路手调权重求和，改为收集信号、循环结束后按名次融合（见下方 RRF）。

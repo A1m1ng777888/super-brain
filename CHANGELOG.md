@@ -1,5 +1,14 @@
 # Changelog — Super Brain 超脑
 
+## v3.8.4 (2026-07-14)
+
+### 修复 — 检索融合加固（surgical 修补，由 Tabbit GLM-5.2 外部算法逻辑审阅发现并验证）
+- `sb_search.py` 的 `expanded_score` 判定 `len(expanded_tokens) > len(query_tokens)` 把「去重后的 set 长度」与「含重复的 list 长度」比较——query 含重复 token（如 `"python python code"`）时两长度被拉平，即使词网真扩展了新 token，条件也为 `False`，第六路信号（词网扩展匹配）被静默关闭，整条查询召回失真
+- 修复：构建 `expanded_tokens` 后记录 `base_token_count = len(expanded_tokens)`（去重后基数），循环中改以 `has_expansion = len(expanded_tokens) > base_token_count`（set-vs-set）判断扩展是否真发生；仅在确有新 token 加入时才点亮第六路
+- `test_v3.py` 新增确定性回归测试（`get_word_network` 注入返回 `["programming"]` 的假词网，query=`"python python"` 含重复，记忆内容仅含扩展 token `"programming"`）：修复前 `expanded_score=0` 且无其他信号达标 → 漏召回；修复后 `has_expansion=True` → 召回。精确区分新旧行为
+- 约束守住：纯标准库零依赖、不改默认输出、不影响合法输入（无重复 token 时行为不变）、不动存储核心；审阅中 `wn` 的 None 防御经核实为误报（`get_word_network` 为保返回工厂，永不返回 `None`），未采纳以免违反 Surgical Changes
+- 254/254 + 1 项回归全过，零回归
+
 ## v3.8.3 (2026-07-14)
 
 ### 修复 — 图谱导出加固（surgical 修补，由 Tabbit GLM-5.2 外部审阅发现）

@@ -124,6 +124,26 @@ test("word network entangled words", isinstance(entangled, list), f"got {type(en
 stats = wn.stats()
 test("word network stats", "total_tokens" in stats and "total_documents" in stats)
 
+# === 3b. P1-1 Regression: 重复 token 查询仍须点亮扩展信号 ===
+# 背景：v3.8.3 用 len(expanded_tokens) > len(query_tokens) 判断"是否发生扩展"，
+# 但 expanded_tokens 是去重后的 set、query_tokens 是含重复的 list。query 含重复 token 时
+# 两长度被拉平，即使词网真扩展了新 token，条件也为 False → 第六路信号被静默关闭。
+# 修复后改用 set-vs-set（base_token_count），不受重复 token 干扰。
+print("\n--- 3b. P1-1 Regression (expanded signal, duplicate-token query) ---")
+import sb_search as _sb_search
+class _FakeWN:
+    _total_docs = 5
+    def expand_query(self, query, max_expansions=3, min_similarity=0.12):
+        return [("programming", 0.9)]   # 确定性地扩展出一个 query 里没有的 token
+_orig_gwn = _sb_search.get_word_network
+_sb_search.get_word_network = lambda workspace=None: _FakeWN()
+_mem = [{"content": "programming only topic here", "entity": "y", "simhash": 0, "ternary_hash": None}]
+_res = _sb_search.search_memories("python python", _mem, limit=10, workspace="p1_reg")
+# query="python python" → tokenize 含重复；记忆内容仅含扩展 token "programming"，
+# 修复前 expanded_score=0 且无其他信号达标 → 漏召回；修复后 has_expansion=True → 召回。
+test("P1-1: duplicate-token query lights expanded signal", len(_res) >= 1, f"got {len(_res)} results (expected >=1)")
+_sb_search.get_word_network = _orig_gwn   # 还原，避免影响后续用例
+
 # === 4. Pipeline (Classification) Tests ===
 print("\n--- 4. Classification Pipeline (分类管线) ---")
 
