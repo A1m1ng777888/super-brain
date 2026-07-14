@@ -1,5 +1,14 @@
 # Changelog — Super Brain 超脑
 
+## v3.8.8 (2026-07-14)
+
+### 修复 — 模糊纠正 + 反污染加固（pack-08 GLM-5.2 审阅）
+- `fuzzy_correct_query` 补 token 纠正 type 键（P1-1 KeyError 崩溃）
+- token 纠正重建改用 `corrected_tokens` 拼接替代 replace（P1-2 全量替换）  
+- 返回 `original_query` 而非被覆写值（P1-3）+ expression 循环用 working_query（P1-4）
+- `RESOLVED_ERROR_PATTERNS` 补已解决/已修复/已处理（P1-5）+ variant.lower()（P2-6）
+262 回归全过，零回归。
+
 ## v3.8.7 (2026-07-14)
 
 ### 修复 — 记忆引擎加固（pack-07 GLM-5.2 审阅）

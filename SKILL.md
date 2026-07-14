@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.8.7
+version: v3.8.8
 released: 2026-07-14
 author: A1m1ng777888
 license: MIT
 description: "Super Brain 超脑认知增强技能 v3.8.3。v3.8.0 双层 Workspace 架构——persona 层（常驻身份记忆，跨项目始终加载）与 project 层（cwd 自动绑定）分离，--persona flag 显式写入身份层，search 双层合并召回（persona ×1.1 boost）。v3.8.1 新增 persona onboarding 首次使用检测——路径未配 + persona 为空时打印 onboarding 提示（代码级兜底，非纯文档约定）。v3.8.2 检索融合升级——收割 TencentDB-Agent-Memory 的 RRF 秩融合范式（Σ1/(K+rank) 替代 6 路手调权重求和）；新增 `graph mermaid` 命令将知识图谱导出为 Mermaid 图（TencentDB 符号化卸载轻量版）。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。基础功能：Karpathy 认知 OS 蒸馏落地——GWT门控层、尾部可靠性自检12项、幽灵标注、审计日志+回滚+解释、构建即理解校验、能力感知路由。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance、persona。v3.8.3 图谱导出加固：SB graph mermaid 的 node id 标识符净化 + read_graph 结构守卫 + 方向归一化兜底，零依赖、不改默认输出。v3.8.4 检索融合加固：由 Tabbit Pro GLM-5.2 外部审阅发现 sb_search.py 的 expanded_score 用 set-vs-list 长度误判「扩展是否发生」，重复 token 查询静默关闭第六路信号；改为 set-vs-set（base_token_count），新增确定性回归测试。纯标准库零依赖、不改默认输出。254+1 项回归全过，零回归。v3.8.5 脱敏脚本加固...纯标准库零依赖、不改默认行为。v3.8.6 门控与纠缠加固：由 Tabbit Pro GLM-5.2 外部审阅发现 7+4 项——sb_gating.py 回滚写盘顺序修正(先写审计再写状态)、get_active_workspace 文档化写副作用与并发声明；sb_entanglement.py reinforce_links 截断修正(max(1,round))、graph 通道权重新增 min(1.0) 归一化守卫、query_entanglement 聚和由加和改峰值。共 5 处 surgical 修改，纯标准库零依赖，262 项回归全过。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.8.7
+# Super Brain (超脑) — 认知增强技能 v3.8.8
 
 ## 概述
 

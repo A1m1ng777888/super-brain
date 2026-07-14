@@ -755,7 +755,7 @@ UNRESOLVED_ERROR_PATTERNS = [
 
 # Patterns that indicate a RESOLVED error (can be stored)
 RESOLVED_ERROR_PATTERNS = [
-    r'(?:解决了|修好了|搞定|修复了|弄好了|成功了)',
+    r'(?:解决了|已解决|解决完毕|修好了|已修复|修复完毕|搞定|弄好了|成功了|已处理|处理完毕)',
     r'(?:原来是|root cause|根本原因)',
     r'(?:解决方法|解决方案|fix|resolve|workaround)',
 ]
@@ -907,6 +907,7 @@ def fuzzy_correct_query(query, workspace=None):
     if not query:
         return {"corrected": query, "corrections": [], "original": query}
     
+    original_query = query  # v3.8.8: 保存原始输入（expression 循环会覆写 query）
     query_tokens = tokenize(query)
     if not query_tokens:
         return {"corrected": query, "corrections": [], "original": query}
@@ -954,38 +955,39 @@ def fuzzy_correct_query(query, workspace=None):
             corrections.append({
                 "original": token,
                 "corrected": best_match,
-                "similarity": round(best_sim, 3)
+                "similarity": round(best_sim, 3),
+                "type": "token"  # v3.8.8: 补 type 键，避免 any(c["type"]...) KeyError
             })
     
     # Also check expression profile for phrase-level corrections
+    # v3.8.8: 用 original_query 做全部匹配，循环内不覆写 query（P1-4 修复）。
+    # 收集所有替换对，循环结束后统一应用。
+    working_query = original_query
     for std_form, variants in profile.get("expression_map", {}).items():
         for variant in variants:
-            if variant in query.lower():
-                # Replace variant with standard form
-                corrected_query = re.sub(re.escape(variant), std_form, query, flags=re.IGNORECASE)
-                if corrected_query != query:
+            if variant.lower() in working_query.lower():  # P2-6: variant 也做 lower
+                corrected_query = re.sub(re.escape(variant), std_form, working_query, flags=re.IGNORECASE)
+                if corrected_query != working_query:
                     corrections.append({
                         "original": variant,
                         "corrected": std_form,
                         "similarity": 1.0,
                         "type": "expression"
                     })
-                    query = corrected_query
+                    working_query = corrected_query
+    query = working_query  # 仅在此处更新一次
     
     # Rebuild corrected query from tokens if token-level corrections were made
-    if any(c["type"] != "expression" for c in corrections):
-        # Simple reconstruction: replace corrected tokens in original query
-        corrected_query = query
-        for correction in corrections:
-            if correction["type"] != "expression":
-                corrected_query = corrected_query.replace(correction["original"], correction["corrected"])
+    if any(c.get("type") != "expression" for c in corrections):
+        # v3.8.8: 用 corrected_tokens 拼接，替代 replace（P1-2 修复）
+        corrected_query = " ".join(corrected_tokens) if corrected_tokens else query
     else:
         corrected_query = query
     
     return {
         "corrected": corrected_query,
         "corrections": corrections,
-        "original": query,
+        "original": original_query,  # v3.8.8: P1-3 修复，返回原始输入而非被覆写值
         "correction_count": len(corrections)
     }
 
