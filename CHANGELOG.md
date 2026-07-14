@@ -1,5 +1,20 @@
 # Changelog — Super Brain 超脑
 
+## v3.8.6 (2026-07-14)
+
+### 修复 — 门控与纠缠加固（surgical 修补，由 Tabbit GLM-5.2 外部审阅发现并实跑验证）
+
+**sb_gating.py:**
+- rollback 先写 memory 再写 audit log → 崩溃窗口导致重复回滚；改为先标记 audit 再恢复 memory（2行调序）
+- `get_active_workspace` 函数名 `get_` 暗示只读但实际写盘；docstring 首行显式标注 "Persists promoted state to disk" + 并发声明
+
+**sb_entanglement.py:**
+- `reinforce_links` 的 `int(strength * 10)` 向零截断，`strength < 0.1` 静默丢弃；改为 `max(1, int(round(strength * 10)))`（2行）
+- graph 通道权重无归一化守卫（未来若产生 weight > 1.0 会主导 combined 排名）；增 `min(1.0, weight)`（1行）
+- `query_entanglement` 聚和用无归一化加和，偏向「广覆盖弱关联」；改为 `max()` 取峰值（1行）
+
+5 处 surgical 修改，纯标准库零依赖，262 项回归全过。
+
 ## v3.8.5 (2026-07-14)
 
 ### 修复 — 脱敏脚本加固（surgical 修补，由 Tabbit GLM-5.2 外部安全审阅发现并实跑验证）

@@ -127,7 +127,7 @@ def mine_entanglement(concept, workspace=None, depth=2, min_strength=0.1):
             results["graph_entanglements"] = [
                 {
                     "concept": conn["target"] if conn["source"] == concept else conn["source"],
-                    "strength": round(conn.get("weight", 1.0), 3),
+                    "strength": round(min(1.0, conn.get("weight", 1.0)), 3),
                     "channel": "graph",
                     "edge_type": conn["type"]
                 }
@@ -184,9 +184,9 @@ def reinforce_links(token1, token2, strength=0.1, workspace=None):
         if token not in wn._token_hashes:
             wn._token_hashes[token] = ternary_hash(token)
     
-    # Reinforce co-occurrence
-    wn._cooccurrence[token1][token2] += int(strength * 10)
-    wn._cooccurrence[token2][token1] += int(strength * 10)
+    # Reinforce co-occurrence (round to nearest int, floor at 1 so non-zero input always produces non-zero increment)
+    wn._cooccurrence[token1][token2] += max(1, int(round(strength * 10)))
+    wn._cooccurrence[token2][token1] += max(1, int(round(strength * 10)))
     
     return {
         "token1": token1,
@@ -289,7 +289,7 @@ def query_entanglement(query, workspace=None, max_results=10):
         for ent in result["combined"]:
             if ent["concept"] in query_tokens:
                 continue  # Skip tokens already in query
-            entangled[ent["concept"]]["strength"] += ent["strength"]
+            entangled[ent["concept"]]["strength"] = max(entangled[ent["concept"]]["strength"], ent["strength"])
             entangled[ent["concept"]]["sources"].append(token)
     
     # Sort by combined strength

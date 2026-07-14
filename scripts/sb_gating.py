@@ -186,6 +186,11 @@ def get_active_workspace(workspace=None, cap=DEFAULT_CAP):
     """
     Return the promoted memories (the 'global workspace' analog).
 
+    **Persists promoted state to disk** (writes memories back).
+    Not thread-safe / Not multi-process safe — last-writer-wins on
+    concurrent access. Chain ignition applied inline; manual
+    gating_override (promote/demote) is respected.
+
     Promotion rule:
       1. A memory is promoted if salience >= threshold OR manually flagged.
       2. Chain ignition: any promoted chain node promotes its whole chain.
@@ -362,8 +367,11 @@ def rollback(n=1, workspace=None):
         count += 1
 
     if rolled_back:
-        write_memories(memories, workspace)
+        # v3.8.6: write audit log BEFORE restoring memories. If we crash
+        # between the two, the audit says "reverted" (no double-rollback);
+        # the residual (memory not yet restored) is detectable via explain().
         write_json(log_path, log)
+        write_memories(memories, workspace)
 
     return {"rolled_back": len(rolled_back), "ids": rolled_back}
 
