@@ -1,5 +1,15 @@
 # Changelog — Super Brain 超脑
 
+## v3.8.5 (2026-07-14)
+
+### 修复 — 脱敏脚本加固（surgical 修补，由 Tabbit GLM-5.2 外部安全审阅发现并实跑验证）
+- `prepublish_strip_local_paths.py` 的 `VAULT_ASSIGN_RE` 行尾 `$` 锚在 `DEFAULT_VAULT_PATH` 赋值行带尾部注释时静默失配，fall-through 到 `DRIVE_PATH_RE`，脱敏结果从标准 `os.path.expanduser("~/ObsidianVault")` 降级为裸串 `"~/ObsidianVault"`（Windows 上 `~` 不展开 = 路径失效）
+- `DRIVE_PATH_RE` 仅覆盖 Windows 盘符路径，漏掉注释/帮助文本中的 Unix 主目录路径（`/home/xxx`、`/Users/xxx`、`/root/xxx`）
+- `file:///E:/` 中的盘符路径被误伤为 `file:///~/ObsidianVault`
+- 修复：`VAULT_ASSIGN_RE` 收尾改为 `\)\s*(?:#.*)?$`（允许可选尾注释），替换时提取并保留原始缩进；`DRIVE_PATH_RE` 负向后行断言由 `(?<![A-Za-z])` 扩展为 `(?<![A-Za-z/])`（排除 `file:///`）；新增 `UNIX_HOME_RE` 覆盖 Unix 主目录路径
+- 新增 `test_prepublish_strip.py`（纯标准库 `unittest`，零依赖）8 项回归测试：无注释赋值、带尾注释赋值、缩进赋值、已通用值不改、Windows 路径、Unix 路径脱敏、`file://` 不误伤、`https://` 不误伤——全过
+- 纯标准库、零依赖、不改默认行为
+
 ## v3.8.4 (2026-07-14)
 
 ### 修复 — 检索融合加固（surgical 修补，由 Tabbit GLM-5.2 外部算法逻辑审阅发现并验证）

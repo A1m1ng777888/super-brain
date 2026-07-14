@@ -47,15 +47,21 @@ import sys
 GENERIC_FALLBACK = 'os.path.expanduser("~/ObsidianVault")'
 
 # DEFAULT_VAULT_PATH = os.environ.get("OBSIDIAN_VAULT_PATH", <回退值>)
+# 行尾允许可选注释 (# ...)，避免尾部注释导致正则失配、静默降级为裸串。
 VAULT_ASSIGN_RE = re.compile(
-    r'DEFAULT_VAULT_PATH\s*=\s*os\.environ\.get\(\s*"OBSIDIAN_VAULT_PATH"\s*,\s*(.*?)\)\s*$'
+    r'DEFAULT_VAULT_PATH\s*=\s*os\.environ\.get\(\s*"OBSIDIAN_VAULT_PATH"\s*,\s*(.*?)\)\s*(?:#.*)?$'
 )
 
-# 绝对路径（盘符 + 斜杠），负向后行断言排除 https:// 等协议 URL。
+# 绝对路径（盘符 + 斜杠），负向后行断言排除 https:// 等协议 URL 与 file:/// 路径段。
 # 路径字符类显式列出（含中文 \u4e00-\u9fff），遇到空白/标点（; ； 。 ，等）即停，
 # 避免把后面的说明文字（如 OBSIDIAN_VAULT_PATH）一起吞掉。
-# 例：某 Windows 盘符绝对路径（如 `X:\some\path`）；但 https:// 中的 s:/ 不会被匹配
-DRIVE_PATH_RE = re.compile(r'(?<![A-Za-z])[A-Za-z]:[\\/][\u4e00-\u9fffa-zA-Z0-9_./\\-]+')
+# 例：某 Windows 盘符绝对路径（如 `X:\some\path`）；但 https:// 中的 s:/ 不会被匹配；
+# file:///E:/... 中 E: 前是 /，亦被排除，避免破坏 URL。
+DRIVE_PATH_RE = re.compile(r'(?<![A-Za-z/])[A-Za-z]:[\\/][\u4e00-\u9fffa-zA-Z0-9_./\\-]+')
+
+# Unix 绝对路径（/home/xxx、/Users/xxx、/root/xxx），避免泄露开发者主目录。
+# 负向后行断言排除字母前缀，避免误伤文档中对 Unix 路径的正当引用。
+UNIX_HOME_RE = re.compile(r'(?<!\w)/(?:home|Users|root)/[\u4e00-\u9fffa-zA-Z0-9_./-]+')
 
 # 只处理这两个事实源文件
 TARGET_FILES = ("sb_obsidian.py", "superbrain.py")
@@ -67,13 +73,15 @@ def strip_text(text):
     lines = text.split("\n")
     out = []
     for line in lines:
-        # 1) DEFAULT_VAULT_PATH 赋值行：强制回退为通用值
+        # 1) DEFAULT_VAULT_PATH 赋值行：强制回退为通用值（保留原始缩进）
         m = VAULT_ASSIGN_RE.search(line)
         if m:
             current = m.group(1).strip()
             if current != GENERIC_FALLBACK:
+                indent = line[: len(line) - len(line.lstrip())]
                 out.append(
-                    'DEFAULT_VAULT_PATH = os.environ.get("OBSIDIAN_VAULT_PATH", '
+                    indent
+                    + 'DEFAULT_VAULT_PATH = os.environ.get("OBSIDIAN_VAULT_PATH", '
                     + GENERIC_FALLBACK
                     + ')'
                 )
@@ -82,13 +90,14 @@ def strip_text(text):
             out.append(line)
             continue
         # 2) 注释 / 帮助文本中的残留绝对路径：替换为 ~/ObsidianVault
-        if DRIVE_PATH_RE.search(line):
-            new_line = DRIVE_PATH_RE.sub("~/ObsidianVault", line)
-            if new_line != line:
-                changed = True
-            out.append(new_line)
-            continue
-        out.append(line)
+        new_line = line
+        if DRIVE_PATH_RE.search(new_line):
+            new_line = DRIVE_PATH_RE.sub("~/ObsidianVault", new_line)
+        if UNIX_HOME_RE.search(new_line):
+            new_line = UNIX_HOME_RE.sub("~/ObsidianVault", new_line)
+        if new_line != line:
+            changed = True
+        out.append(new_line)
     return "\n".join(out), changed
 
 

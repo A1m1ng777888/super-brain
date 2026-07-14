@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.8.4
+version: v3.8.5
 released: 2026-07-14
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.8.3。v3.8.0 双层 Workspace 架构——persona 层（常驻身份记忆，跨项目始终加载）与 project 层（cwd 自动绑定）分离，--persona flag 显式写入身份层，search 双层合并召回（persona ×1.1 boost）。v3.8.1 新增 persona onboarding 首次使用检测——路径未配 + persona 为空时打印 onboarding 提示（代码级兜底，非纯文档约定）。v3.8.2 检索融合升级——收割 TencentDB-Agent-Memory 的 RRF 秩融合范式（Σ1/(K+rank) 替代 6 路手调权重求和）；新增 `graph mermaid` 命令将知识图谱导出为 Mermaid 图（TencentDB 符号化卸载轻量版）。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。基础功能：Karpathy 认知 OS 蒸馏落地——GWT门控层、尾部可靠性自检12项、幽灵标注、审计日志+回滚+解释、构建即理解校验、能力感知路由。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance、persona。v3.8.3 图谱导出加固：SB graph mermaid 的 node id 标识符净化 + read_graph 结构守卫 + 方向归一化兜底，零依赖、不改默认输出。v3.8.4 检索融合加固：由 Tabbit Pro GLM-5.2 外部审阅发现 sb_search.py 的 expanded_score 用 set-vs-list 长度误判「扩展是否发生」，重复 token 查询静默关闭第六路信号；改为 set-vs-set（base_token_count），新增确定性回归测试。纯标准库零依赖、不改默认输出。254+1 项回归全过，零回归。"
+description: "Super Brain 超脑认知增强技能 v3.8.3。v3.8.0 双层 Workspace 架构——persona 层（常驻身份记忆，跨项目始终加载）与 project 层（cwd 自动绑定）分离，--persona flag 显式写入身份层，search 双层合并召回（persona ×1.1 boost）。v3.8.1 新增 persona onboarding 首次使用检测——路径未配 + persona 为空时打印 onboarding 提示（代码级兜底，非纯文档约定）。v3.8.2 检索融合升级——收割 TencentDB-Agent-Memory 的 RRF 秩融合范式（Σ1/(K+rank) 替代 6 路手调权重求和）；新增 `graph mermaid` 命令将知识图谱导出为 Mermaid 图（TencentDB 符号化卸载轻量版）。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。基础功能：Karpathy 认知 OS 蒸馏落地——GWT门控层、尾部可靠性自检12项、幽灵标注、审计日志+回滚+解释、构建即理解校验、能力感知路由。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance、persona。v3.8.3 图谱导出加固：SB graph mermaid 的 node id 标识符净化 + read_graph 结构守卫 + 方向归一化兜底，零依赖、不改默认输出。v3.8.4 检索融合加固：由 Tabbit Pro GLM-5.2 外部审阅发现 sb_search.py 的 expanded_score 用 set-vs-list 长度误判「扩展是否发生」，重复 token 查询静默关闭第六路信号；改为 set-vs-set（base_token_count），新增确定性回归测试。纯标准库零依赖、不改默认输出。254+1 项回归全过，零回归。v3.8.5 脱敏脚本加固：由 Tabbit Pro GLM-5.2 外部安全审阅发现 prepublish_strip_local_paths.py 的 VAULT_ASSIGN_RE 行尾 $ 锚在尾部注释场景静默失配、降级为裸串 ~/ObsidianVault（丢 os.path.expanduser）；DRIVE_PATH_RE 仅覆盖 Windows 盘符、漏 Unix 主目录路径；file:/// 盘符被误伤。修复：VAULT_ASSIGN_RE 允许可选尾注释并保留缩进、DRIVE_PATH_RE 负向后行断言排除 /、新增 UNIX_HOME_RE 覆盖 Unix 路径。补 unittest 回归测试。纯标准库零依赖、不改默认行为。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.8.4
+# Super Brain (超脑) — 认知增强技能 v3.8.5
 
 ## 概述
 
@@ -22,6 +22,8 @@ description: "Super Brain 超脑认知增强技能 v3.8.3。v3.8.0 双层 Worksp
 **v3.8.3 升级：图谱导出加固（surgical 修补）。** 由 Tabbit Pro 的 GLM-5.2 外部代码审阅发现并验证：`sb_mermaid.py` 的 node id 直接作为 Mermaid 标识符未净化（特殊字符 id 静默产出非法图）、`read_graph` 返回 None/畸形值缺乏守卫。修复：① 引入 `_safe_nid()` + `orig_to_safe` 映射，节点与边共用保证引用一致；② `read_graph` 返回非 dict/结构异常时走占位图而非崩溃；③ 方向非法值兜底 LR、`_sanitize` 处理换行与 `]`、悬空边附注释、去掉 `eid` 死代码。**零依赖、不改默认输出、不影响合法输入行为**。详见「命令参考 > v3.8.3 变更」。254/254 + 11 项回归全过。
 
 **v3.8.4 升级：检索融合加固（surgical 修补）。** 由 Tabbit Pro 的 GLM-5.2 外部算法逻辑审阅发现并验证：`sb_search.py` 的 `expanded_score` 判定 `len(expanded_tokens) > len(query_tokens)` 把「去重后的 set 长度」与「含重复的 list 长度」比较——query 含重复 token 时两长度被拉平，即使词网真扩展了新 token，条件也为 False，第六路信号（词网扩展匹配）被静默关闭，整条查询召回失真。修复：记录 `base_token_count`（去重后基数），改以 `len(expanded_tokens) > base_token_count`（set-vs-set）判断扩展是否发生。**纯标准库、零依赖、不改默认输出**。新增确定性回归测试（重复 token 查询 + 仅含扩展 token 的记忆，旧逻辑漏召回、修复后召回）。详见「命令参考 > v3.8.4 变更」。254/254 + 1 项回归全过。
+
+**v3.8.5 升级：脱敏脚本加固（surgical 修补）。** 由 Tabbit Pro 的 GLM-5.2 外部安全审阅发现并实跑验证：`prepublish_strip_local_paths.py` 的 `VAULT_ASSIGN_RE` 行尾 `$` 锚在赋值行带尾部注释时静默失配，fall-through 到 `DRIVE_PATH_RE`，脱敏结果从标准 `os.path.expanduser("~/ObsidianVault")` 降级为裸串 `"~/ObsidianVault"`（Windows 上 `~` 不展开 = 路径失效）；`DRIVE_PATH_RE` 仅覆盖 Windows 盘符路径，漏掉注释/帮助文本中的 Unix 主目录路径（`/home/xxx`、`/Users/xxx`、`/root/xxx`）；`file:///E:/` 中的盘符路径被误伤为 `file:///~/ObsidianVault`。修复：`VAULT_ASSIGN_RE` 允许可选尾注释且替换时保留原始缩进；`DRIVE_PATH_RE` 负向后行断言追加排除 `/`（`file:///` 不再误伤）；新增 `UNIX_HOME_RE` 覆盖 Unix 主目录路径。**纯标准库、零依赖、不改默认行为**。新增 `test_prepublish_strip.py` 8 项 unittest 回归（尾注释/缩进/Unix/https/file:// 控制组），全过。详见「命令参考 > v3.8.5 变更」。
 
 所有数据本地存储（默认 `~/.workbuddy/super-brain/`），不依赖任何外部服务或 API。
 
@@ -554,6 +556,15 @@ input_schema:
 
 - **检索融合 RRF 化**：`search_memories()` 内部从 6 路手调权重求和改为 RRF（Σ1/(K+rank)，K=60），收割 TencentDB-Agent-Memory 的符号化范式；新增 `_signal_relevant()` 粗筛跳过纯噪声，动态阈值按 RRF 量纲自适应。召回质量对权重敏感度的依赖显著降低。
 
+### v3.8.5 变更（脱敏脚本加固 · surgical 修补）
+
+- **VAULT_ASSIGN_RE 尾部注释失配修复**：`prepublish_strip_local_paths.py` 的 `VAULT_ASSIGN_RE` 原以 `\)\s*$` 收尾，要求 `)` 后直接到行尾。当 `DEFAULT_VAULT_PATH` 赋值行带行内注释（如 `  # 默认库`），正则无法匹配，该行 fall-through 到 `DRIVE_PATH_RE`，脱敏结果从标准 `os.path.expanduser("~/ObsidianVault")` 降级为裸串 `"~/ObsidianVault"`——Windows 上 `~` 不展开，发布副本的 vault 路径解析被破坏。
+- **修复方式**：正则收尾改为 `\)\s*(?:#.*)?$`，允许可选尾注释；替换逻辑提取并保留原始缩进（不再硬编码无缩进）。赋值行无论是否带注释，均走 VAULT 分支产出正确的 `expanduser` 包装。
+- **Unix 路径覆盖 + URL 误伤修复**：
+  - 新增 `UNIX_HOME_RE`（`(?<!\w)/(?:home|Users|root)/[\u4e00-\u9fffa-zA-Z0-9_./-]+`），覆盖注释/帮助文本中残留的 Unix 主目录绝对路径，避免泄露开发者主目录。
+  - `DRIVE_PATH_RE` 负向后行断言由 `(?<![A-Za-z])` 扩展为 `(?<![A-Za-z/])`，排除 `file:///E:/` 中的盘符路径被误伤（`file:///E:/foo` 不再被破坏为 `file:///~/ObsidianVault`）。
+- **回归测试**：新增 `test_prepublish_strip.py`（纯标准库 `unittest`，零依赖）8 项用例——无注释赋值、带尾注释赋值（P0-1）、缩进赋值（P0-2）、已通用值不改、注释中 Windows 路径、Unix 路径脱敏（P1-1）、`file://` 不误伤（P2-1）、`https://` 不误伤。全过。
+
 ### v3.8.4 变更（检索融合加固 · surgical 修补）
 
 - **扩展信号判定修复**：`search_memories()` 的 `expanded_score` 原判定 `len(expanded_tokens) > len(query_tokens)`——`expanded_tokens` 是去重后的 `set`、`query_tokens` 是含重复的 `list`。当 query 含重复 token（如 `"python python code"`），两长度被拉平为相等，即使词网真扩展了新 token，条件也为 `False`，`expanded_score` 被静默置 0，第六路信号（词网扩展匹配）整条查询失效。
@@ -670,6 +681,7 @@ input_schema:
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.8.5** | **2026-07-14** | **脱敏脚本加固（surgical 修补）：** 由 Tabbit Pro GLM-5.2 外部安全审阅发现并实跑验证 `prepublish_strip_local_paths.py` 的 `VAULT_ASSIGN_RE` 行尾 `$` 锚在尾部注释场景静默失配、fall-through 到 `DRIVE_PATH_RE` 降级为裸串 `~/ObsidianVault`（丢 `os.path.expanduser`，Windows 上 `~` 不展开）；`DRIVE_PATH_RE` 仅覆盖 Windows 盘符、漏 Unix 主目录路径（`/home/xxx` 等）；`file:///E:/` 盘符被误伤。修复：`VAULT_ASSIGN_RE` 允许可选尾注释 + 替换保留缩进；`DRIVE_PATH_RE` 负向后行断言排除 `/`；新增 `UNIX_HOME_RE` 覆盖 Unix 路径。新增 `test_prepublish_strip.py` 8 项 unittest 回归。纯标准库零依赖、不改默认行为。strip 8/8 回归全过，核心套件 4/5 通过（test_superbrain 的 `total==5` 为与实时记忆数耦合的既有脆弱断言、与本补丁无关）。 |
 | **v3.8.4** | **2026-07-14** | **检索融合加固（surgical 修补）：** 由 Tabbit Pro GLM-5.2 外部算法逻辑审阅发现 `sb_search.py` 的 `expanded_score` 用 `len(expanded_tokens) > len(query_tokens)`（set-vs-list）误判「扩展是否发生」——query 含重复 token 时两长度拉平，即使词网真扩展新 token，条件也为 False，第六路信号静默关闭。修复：记录 `base_token_count`（去重基数），改以 `len(expanded_tokens) > base_token_count`（set-vs-set）判断。新增确定性回归测试（重复 token 查询 + 仅含扩展 token 的记忆，旧逻辑漏召回/修复后召回）。纯标准库零依赖、不改默认输出。254/254 + 1 项回归全过，零回归。 |
 | **v3.8.3** | **2026-07-14** | **图谱导出加固（surgical 修补）：** 由 Tabbit Pro GLM-5.2 外部审阅发现 `sb_mermaid.py` 的 node id 未净化（特殊字符 id 静默产出非法 Mermaid 图）、`read_graph` 缺守卫。修复：引入 `_safe_nid()` + `orig_to_safe` 映射净化标识符；`read_graph` 返 None/非 dict 走占位图；方向非法兜底 LR、`_sanitize` 处理换行/`]`、悬空边注释、去 `eid` 死代码。零依赖、不改默认输出、不影响合法输入。254/254 + 11 项回归全过，零回归。 |
 | **v3.8.2** | **2026-07-14** | **检索融合 RRF 化 + 图谱 Mermaid 化：** ① 检索融合重构——弃用 6 路手调权重求和，改为 RRF（Reciprocal Rank Fusion，Σ1/(K+rank)，K=60），收割 TencentDB-Agent-Memory 符号化范式；新增 `_signal_relevant()` 粗筛（任一路信号达最低阈值才入候选）跳过纯噪声，动态阈值按 RRF 量纲自适应。② 新增 `graph mermaid` 命令（`sb_mermaid.py`）：把 `graph.json` 知识图谱导出为 Mermaid 图（实体/记忆节点按类别/type 上色、关系标签、方向可选 LR/TB），是 TencentDB「符号化卸载」的轻量落地。`SB graph mermaid [--workspace NAME] [--direction LR|TB]`。③ SKILL.md 新增「命令输入契约」声明式 input_schema 段。254/254 测试全过，零回归。 |
