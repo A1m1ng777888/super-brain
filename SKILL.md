@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.8.2
+version: v3.8.3
 released: 2026-07-14
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.8.2。v3.8.0 双层 Workspace 架构——persona 层（常驻身份记忆，跨项目始终加载）与 project 层（cwd 自动绑定）分离，--persona flag 显式写入身份层，search 双层合并召回（persona ×1.1 boost）。v3.8.1 新增 persona onboarding 首次使用检测——路径未配 + persona 为空时打印 onboarding 提示（代码级兜底，非纯文档约定）。v3.8.2 检索融合升级——收割 TencentDB-Agent-Memory 的 RRF 秩融合范式（Σ1/(K+rank) 替代 6 路手调权重求和）；新增 `graph mermaid` 命令将知识图谱导出为 Mermaid 图（TencentDB 符号化卸载轻量版）。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。基础功能：Karpathy 认知 OS 蒸馏落地——GWT门控层、尾部可靠性自检12项、幽灵标注、审计日志+回滚+解释、构建即理解校验、能力感知路由。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance、persona"
+description: "Super Brain 超脑认知增强技能 v3.8.3。v3.8.0 双层 Workspace 架构——persona 层（常驻身份记忆，跨项目始终加载）与 project 层（cwd 自动绑定）分离，--persona flag 显式写入身份层，search 双层合并召回（persona ×1.1 boost）。v3.8.1 新增 persona onboarding 首次使用检测——路径未配 + persona 为空时打印 onboarding 提示（代码级兜底，非纯文档约定）。v3.8.2 检索融合升级——收割 TencentDB-Agent-Memory 的 RRF 秩融合范式（Σ1/(K+rank) 替代 6 路手调权重求和）；新增 `graph mermaid` 命令将知识图谱导出为 Mermaid 图（TencentDB 符号化卸载轻量版）。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。基础功能：Karpathy 认知 OS 蒸馏落地——GWT门控层、尾部可靠性自检12项、幽灵标注、审计日志+回滚+解释、构建即理解校验、能力感知路由。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、Token ROI、门控、能力评分、审计、回滚、provenance、persona。v3.8.3 图谱导出加固：SB graph mermaid 的 node id 标识符净化 + read_graph 结构守卫 + 方向归一化兜底，零依赖、不改默认输出。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.8.2
+# Super Brain (超脑) — 认知增强技能 v3.8.3
 
 ## 概述
 
@@ -18,6 +18,8 @@ description: "Super Brain 超脑认知增强技能 v3.8.2。v3.8.0 双层 Worksp
 **v3.7.1 升级：先检索后入库·代码级强制。** 把「对话即入库」从文档约定升级为 `superbrain.py` 的代码拦截——`memory add` / `longterm ingest` / `memory auto-store` 三个写入命令执行前校验「30 分钟窗口内是否做过 `memory search`」，未满足则 `exit 2` 拦截；`--force` 可显式豁免并写入 `.hardstep.json` 审计。详见「命令参考 > v3.7.1 变更」。
 
 **v3.8.2 升级：检索融合 RRF 化 + 图谱 Mermaid 化。** ① 检索融合从 6 路手调权重求和改为 **RRF（Reciprocal Rank Fusion）**——Σ 1/(K+rank)（K=60），收割 TencentDB-Agent-Memory 的符号化范式，动态阈值按 RRF 量纲自适应；② 新增 `SB graph mermaid` 命令（`sb_mermaid.py`），把 `graph.json` 知识图谱导出为 Mermaid 图（节点按类别/type 上色、关系标签），是 TencentDB「符号化卸载」的轻量落地——让图谱可被任意 Markdown/渲染器消费。详见「命令参考 > v3.8.2 新增命令」。254/254 测试全过。
+
+**v3.8.3 升级：图谱导出加固（surgical 修补）。** 由 Tabbit Pro 的 GLM-5.2 外部代码审阅发现并验证：`sb_mermaid.py` 的 node id 直接作为 Mermaid 标识符未净化（特殊字符 id 静默产出非法图）、`read_graph` 返回 None/畸形值缺乏守卫。修复：① 引入 `_safe_nid()` + `orig_to_safe` 映射，节点与边共用保证引用一致；② `read_graph` 返回非 dict/结构异常时走占位图而非崩溃；③ 方向非法值兜底 LR、`_sanitize` 处理换行与 `]`、悬空边附注释、去掉 `eid` 死代码。**零依赖、不改默认输出、不影响合法输入行为**。详见「命令参考 > v3.8.3 变更」。254/254 + 11 项回归全过。
 
 所有数据本地存储（默认 `~/.workbuddy/super-brain/`），不依赖任何外部服务或 API。
 
@@ -550,6 +552,13 @@ input_schema:
 
 - **检索融合 RRF 化**：`search_memories()` 内部从 6 路手调权重求和改为 RRF（Σ1/(K+rank)，K=60），收割 TencentDB-Agent-Memory 的符号化范式；新增 `_signal_relevant()` 粗筛跳过纯噪声，动态阈值按 RRF 量纲自适应。召回质量对权重敏感度的依赖显著降低。
 
+### v3.8.3 变更（图谱导出加固 · surgical 修补）
+
+- **node id 标识符净化**：`graph_to_mermaid()` 原把 `graph.json` 的 node id 直接塞进 Mermaid 标识符位置（如 `my node / A [x]`），含空格/中文/方括号时静默产出非法语法。新增 `_safe_nid()`（正则 `[^A-Za-z0-9_]` 替换，纯标准库）与 `orig_to_safe` 映射，节点与边共用保证两端引用一致。
+- **读取守卫**：`read_graph` 返回 `None`/非 dict，或 nodes/edges 值非 dict 时，返回带 `%%` 注释的占位图而非抛 `AttributeError`。
+- **健壮性微调**：`--direction` 非法值兜底为 `LR`（CLI `choices` 显式报错）；`_sanitize` 增加换行与 `]` 处理；悬空边附 `%% N 条悬空边已忽略` 注释；去除 `eid` 循环死变量。
+- **约束守住**：纯标准库零依赖、不改默认输出、不影响合法 slug id 的输入行为。
+
 ### v3.8.1 变更（Persona onboarding 代码级兜底）
 
 - **首次使用检测**：`workspace persona --show`（或无参数运行）时，`_persona_onboarding_hint()` 检测 `persona_workspace_path is None` 且 persona memories 为空，打印 onboarding 提示（三选项 + 指向 SKILL.md 向导章节）。
@@ -652,6 +661,7 @@ input_schema:
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.8.3** | **2026-07-14** | **图谱导出加固（surgical 修补）：** 由 Tabbit Pro GLM-5.2 外部审阅发现 `sb_mermaid.py` 的 node id 未净化（特殊字符 id 静默产出非法 Mermaid 图）、`read_graph` 缺守卫。修复：引入 `_safe_nid()` + `orig_to_safe` 映射净化标识符；`read_graph` 返 None/非 dict 走占位图；方向非法兜底 LR、`_sanitize` 处理换行/`]`、悬空边注释、去 `eid` 死代码。零依赖、不改默认输出、不影响合法输入。254/254 + 11 项回归全过，零回归。 |
 | **v3.8.2** | **2026-07-14** | **检索融合 RRF 化 + 图谱 Mermaid 化：** ① 检索融合重构——弃用 6 路手调权重求和，改为 RRF（Reciprocal Rank Fusion，Σ1/(K+rank)，K=60），收割 TencentDB-Agent-Memory 符号化范式；新增 `_signal_relevant()` 粗筛（任一路信号达最低阈值才入候选）跳过纯噪声，动态阈值按 RRF 量纲自适应。② 新增 `graph mermaid` 命令（`sb_mermaid.py`）：把 `graph.json` 知识图谱导出为 Mermaid 图（实体/记忆节点按类别/type 上色、关系标签、方向可选 LR/TB），是 TencentDB「符号化卸载」的轻量落地。`SB graph mermaid [--workspace NAME] [--direction LR|TB]`。③ SKILL.md 新增「命令输入契约」声明式 input_schema 段。254/254 测试全过，零回归。 |
 | **v3.8.1** | **2026-07-11** | **Persona onboarding 代码级兜底：** `superbrain.py` 新增 `_persona_onboarding_hint()`——`workspace persona --show`（或无参数运行）时，检测 `persona_workspace_path is None` 且 persona memories 为空，则打印 onboarding 提示（三选项 + 指向 SKILL.md 向导章节）。将 persona onboarding 从纯文档约定升级为代码级提示，与 v3.7.1 硬步骤同哲学：用代码兜底而非靠纪律。 |
 | **v3.8.0** | **2026-07-11** | **双层 Workspace 架构（persona × project 分离）：** 新增 persona workspace（常驻身份记忆层）——砚的身份记忆（偏好/决策/身份/跨项目事实）独立存储，不随 cwd 切换。对应 Freehold L1（始终自有数据主权）vs L2/L3（项目能力层可换）。① `sb_core.py` 新增 `resolve_workspace()`（cwd→.workbuddy 自动绑定，替代全局单激活开关）、`get_persona_workspace_dir()`、`read_persona_memories()`、`write_persona_memories()`；`get_workspace_dir()` 回退逻辑改为先试 cwd 解析；DEFAULT_CONFIG 新增 `persona_workspace_path` 字段。② `sb_memory.py` `search()` 双层合并召回（persona 结果 ×1.1 boost，去重）；`add_memory()` 新增 `persona=False` 参数，`persona=True` 时写入 persona workspace。③ `superbrain.py` 新增 `workspace persona --path/--show` CLI 子命令；`memory add` 新增 `--persona` flag。④ 通用版首次使用时通过 `workspace persona --path` 配置路径，默认 fallback 到 `~/.workbuddy/super-brain/workspaces/persona/`。49/49 回归全通过，零回归。 |

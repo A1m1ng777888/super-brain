@@ -1,5 +1,14 @@
 # Changelog — Super Brain 超脑
 
+## v3.8.3 (2026-07-14)
+
+### 修复 — 图谱导出加固（surgical 修补，由 Tabbit GLM-5.2 外部审阅发现）
+- `sb_mermaid.py` 的 node id 直接作为 Mermaid 标识符未净化（特殊字符 id 如 `my node / A [x]` 静默产出非法图）——新增 `_safe_nid()`（正则 `[^A-Za-z0-9_]` 替换，纯标准库）+ `orig_to_safe` 映射，节点与边共用保证引用一致
+- `read_graph` 返回 `None`/非 dict 或 nodes/edges 值非 dict 时缺守卫（抛 `AttributeError`）——改为返回带 `%%` 注释的占位图
+- `--direction` 非法值兜底为 `LR`（CLI `choices` 显式报错）；`_sanitize` 增加换行与 `]` 处理；悬空边附 `%% N 条悬空边已忽略` 注释；去除 `eid` 循环死变量
+- 约束守住：纯标准库零依赖、不改默认输出、不影响合法 slug id 的输入行为
+- 254/254 + 11 项回归全过，零回归
+
 ## v3.8.2 (2026-07-14)
 
 ### 升级 — 检索融合 RRF 化 + 图谱 Mermaid 化
