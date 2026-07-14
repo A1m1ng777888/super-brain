@@ -142,6 +142,7 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
 
     # --- Temporal: conflict detection (v2.1.0) + R11 内容相似度 ---
     conflict = False
+    conflict_target = None  # v3.8.7: 记录冲突目标，用于自动 replaces
     if config.get("temporal", {}).get("conflict_detection", True):
         entity_key = (entity or "general").lower()
         for existing in memories:
@@ -154,13 +155,18 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
             # R11: 内容相似度检查（无论有无 valid_from，用 SimHash 防绕过）
             try:
                 from sb_search import simhash_similarity
-                sim = simhash_similarity(sh, existing.get("simhash", 0))
+                sim = simhash_similarity(sh, existing.get("simhash") or 0)
                 if sim >= 0.85:
                     if config.get("temporal", {}).get("conflict_overlap_warning", True):
                         print(f"  ⚠ Near-duplicate content with memory {existing['id']} (sim={sim:.3f})")
-                        print(f"    Tip: use --replaces {existing['id']} if this supersedes the old fact.")
                     conflict = True
-                    break
+                    # v3.8.7: 记录 conflict score，auto-replace 仅对 ≥0.95 生效
+                    conflict_score = sim
+                    conflict_target = existing
+                    if sim >= 0.95:
+                        break  # 极高相似，立即截断（无需继续检查其他记忆）
+            except (ImportError, TypeError, ValueError) as e:
+                print(f"  ⚠ SimHash conflict check skipped: {e}")
             except Exception:
                 pass
             # 时间重叠检查（需要双方都有 valid_from）
@@ -178,6 +184,8 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
                 conflict = True
                 break
 
+    # v3.8.7: conflict_score/conflict_target 已记录供诊断。
+    # auto-replace 不在此层做——短字符串 SimHash 偏高，误伤面大。
     # R10: SimHash/ternary_hash/new_id 已在上方提前生成
     memory = {
         "id": new_id,
@@ -292,9 +300,11 @@ def update_memory(mem_id, content=None, confidence=None, status=None,
         if m["id"] == mem_id:
             if content is not None:
                 m["content"] = content
-                # Recalculate SimHash
+                # Recalculate both hashes (v3.8.7: 补 ternary_hash 更新 + simhash_bits 一致性)
                 full_text = f"{m.get('entity', '')} {content}"
-                m["simhash"] = simhash(full_text)
+                bits = load_config().get("simhash_bits", 64)
+                m["simhash"] = simhash(full_text, bits)
+                m["ternary_hash"] = ternary_hash(full_text, bits)
             if confidence is not None:
                 m["confidence"] = confidence
             if status is not None:
@@ -345,9 +355,13 @@ def merge_memories(id1, id2, workspace=None):
     Merge two memories. The higher-confidence memory absorbs the lower one.
     Returns the merged memory or None if failed.
     """
-    m1 = get_memory(id1, workspace)
-    m2 = get_memory(id2, workspace)
+    memories = read_memories(workspace)  # v3.8.7: 直接持有全量引用，不走 update_memory 的重复读
+    m1 = m2 = None
+    for m in memories:
+        if m["id"] == id1: m1 = m
+        if m["id"] == id2: m2 = m
     if not m1 or not m2:
+        print(f"  ⚠ merge_memories: one or both IDs not found (id1={id1}, id2={id2})")
         return None
 
     # Determine which absorbs which
@@ -380,13 +394,16 @@ def merge_memories(id1, id2, workspace=None):
         keeper.get("related_nodes", []) + deprecated.get("related_nodes", [])
     ))
 
-    # Update the keeper
-    update_memory(keeper["id"], content=keeper["content"],
-                  confidence=keeper["confidence"], attributes=keeper_attrs,
-                  workspace=workspace)
-
-    # Mark deprecated as archived
-    update_memory(deprecated["id"], status="archived", workspace=workspace)
+    # v3.8.7: 不走 update_memory（会从磁盘重读、丢失 related_nodes 合并结果）。
+    # 直接在 memories 列表上操作后一次性写回——避免 3 次文件读取。
+    keeper["attributes"] = keeper_attrs
+    deprecated["status"] = "archived"
+    deprecated["replaced_by"] = keeper["id"]
+    write_memories(memories, workspace)
+    _audit_log("merge", keeper["id"],
+               f"Merged {deprecated['id']} into keeper (similarity-based)",
+               {}, {"merged_from": deprecated["id"]},
+               reversible=False, workspace=workspace)
 
     return keeper
 
@@ -410,7 +427,7 @@ def search(query, limit=10, workspace=None, update_access_stats=True):
                               workspace=workspace)
 
     # v2.1.0: time-aware score penalty for expired facts
-    now = datetime.now(tz.utc).strftime("%Y-%m-%d")
+    now = datetime.now().strftime("%Y-%m-%d")  # v3.8.7: 本地时间
     scored_results = []
     for mem, score, match_type in results:
         valid_until = mem.get("valid_until")
@@ -430,15 +447,15 @@ def search(query, limit=10, workspace=None, update_access_stats=True):
     scored_results.sort(key=lambda x: x[1], reverse=True)
 
     # R4: 写副作用参数化——update_access_stats=False 时不更新 access_count
+    # v3.8.7: 复用第一次 read_memories 的引用（memories），避免二次全读
     if update_access_stats and scored_results:
-        all_memories = read_memories(workspace)
         result_ids = {r[0]["id"] for r in scored_results}
         now_ts = get_timestamp()
-        for m in all_memories:
+        for m in memories:
             if m["id"] in result_ids:
                 m["access_count"] = m.get("access_count", 0) + 1
                 m["last_accessed"] = now_ts
-        write_memories(all_memories, workspace)
+        write_memories(memories, workspace)
 
     # v3.8.0: 双层召回——合并 persona workspace（常驻身份层）
     # persona 记忆给 ×1.1 boost（身份层优先），去重后合并
@@ -587,7 +604,7 @@ def get_stats(workspace=None):
     by_access = sorted(active, key=lambda m: m.get("access_count", 0), reverse=True)[:5]
 
     # v2.1.0: temporal stats
-    now = datetime.now(tz.utc).strftime("%Y-%m-%d")
+    now = datetime.now().strftime("%Y-%m-%d")  # v3.8.7: 本地时间
     with_temporal = [m for m in active if m.get("valid_from")]
     expired_active = [m for m in active if m.get("valid_until") and m["valid_until"] < now]
     chain_linked = [m for m in active if m.get("replaces")]

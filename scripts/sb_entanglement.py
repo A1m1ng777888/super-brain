@@ -285,7 +285,9 @@ def query_entanglement(query, workspace=None, max_results=10):
     for token in query_tokens:
         # Mine entanglement for each query token
         result = mine_entanglement(token, workspace, depth=1, min_strength=0.05)
-        
+        # v3.8.7: 冷启动返回无 combined 字段，跳过
+        if "combined" not in result:
+            continue
         for ent in result["combined"]:
             if ent["concept"] in query_tokens:
                 continue  # Skip tokens already in query

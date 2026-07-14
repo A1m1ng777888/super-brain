@@ -1,5 +1,17 @@
 # Changelog — Super Brain 超脑
 
+## v3.8.7 (2026-07-14)
+
+### 修复 — 记忆引擎加固（pack-07 GLM-5.2 审阅）
+- `add_memory` 冲突检测 dead variable 复活：记录 conflict_score/conflict_target 供诊断
+- `merge_memories` related_nodes 落盘丢失：不走 update_memory 重读磁盘，直接在 memories 引用上操作后单次落盘 + audit log
+- `search` vs `get_context`/`get_stats` 时区统一为本地时间
+- `search` 去冗余二次 read_memories，复用第一次引用
+- `update_memory` 补 ternary_hash 更新 + simhash_bits 一致性
+- `add_memory` except 收窄(ImportError/TypeError/ValueError)
+- `query_entanglement` 冷启动 warmup 守卫防 KeyError
+262 项回归全过，零回归。
+
 ## v3.8.6 (2026-07-14)
 
 ### 修复 — 门控与纠缠加固（surgical 修补，由 Tabbit GLM-5.2 外部审阅发现并实跑验证）
