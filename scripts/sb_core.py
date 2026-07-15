@@ -12,6 +12,7 @@ import os
 import sys
 import time
 import uuid
+import copy
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -109,9 +110,13 @@ def load_config():
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return DEFAULT_CONFIG.copy()
+        except (json.JSONDecodeError, IOError) as e:
+            # v3.9.1: 损坏时备份 + warning（与 read_memories/read_graph 一致）
+            import shutil
+            backup = f"config_corrupt_backup_{int(time.time())}.json"
+            shutil.copy2(config_path, os.path.join(DEFAULT_DATA_DIR, backup))
+            print(f"  ⚠ load_config: corrupt — backed up to {backup}: {e}", file=sys.stderr)
+    return copy.deepcopy(DEFAULT_CONFIG)  # v3.9.1: deepcopy 防嵌套字典污染
 
 
 def save_config(config):
@@ -246,6 +251,8 @@ def get_workspace_dir(workspace_name=None):
 
 def ensure_workspace(workspace_name=None):
     """Ensure workspace directory and files exist."""
+    if workspace_name is None:  # v3.9.1: 提前解析，避免 meta name 字段写"default"
+        workspace_name = resolve_workspace()
     ws_dir = get_workspace_dir(workspace_name)
     ensure_dir(ws_dir)
     # Ensure data files exist
@@ -281,6 +288,9 @@ def list_workspaces():
 
 def switch_workspace(name):
     """Switch current workspace."""
+    # v3.9.1: 校验名称不含路径分隔符，防止目录穿越
+    if not name or "/" in name or "\\" in name or ".." in name:
+        raise ValueError(f"Invalid workspace name: {name!r}")
     config = load_config()
     config["current_workspace"] = name
     save_config(config)
@@ -340,18 +350,29 @@ def write_memories(memories, workspace=None):
     ws_dir = ensure_workspace(workspace)
     path = os.path.join(ws_dir, "memories.json")
     write_json(path, memories)
-    # Update meta
-    meta_path = os.path.join(ws_dir, "meta.json")
-    meta = read_json(meta_path) or {}
-    meta["memory_count"] = len(memories)
-    write_json(meta_path, meta)
+    # v3.9.1: meta 更新失败不应阻断主写入
+    try:
+        meta_path = os.path.join(ws_dir, "meta.json")
+        meta = read_json(meta_path) or {}
+        meta["memory_count"] = len(memories)
+        write_json(meta_path, meta)
+    except Exception as e:
+        print(f"  ⚠ write_memories: meta update failed: {e}", file=sys.stderr)
 
 
 def read_graph(workspace=None):
     """Read knowledge graph from workspace."""
     ws_dir = ensure_workspace(workspace)
     path = os.path.join(ws_dir, "graph.json")
-    return read_json(path) or {"nodes": {}, "edges": {}}
+    data = read_json(path)
+    # v3.9.1: 与 read_memories 一致——损坏时备份 + warning
+    if data is None and os.path.exists(path):
+        import shutil
+        backup_name = f"graph_corrupt_backup_{int(time.time())}.json"
+        shutil.copy2(path, os.path.join(ws_dir, backup_name))
+        print(f"  ⚠ read_graph: JSON corrupt — backed up to {backup_name}", file=sys.stderr)
+        return {"nodes": {}, "edges": {}}
+    return data if data else {"nodes": {}, "edges": {}}
 
 
 def write_graph(graph, workspace=None):
@@ -359,12 +380,15 @@ def write_graph(graph, workspace=None):
     ws_dir = ensure_workspace(workspace)
     path = os.path.join(ws_dir, "graph.json")
     write_json(path, graph)
-    # Update meta
-    meta_path = os.path.join(ws_dir, "meta.json")
-    meta = read_json(meta_path) or {}
-    meta["node_count"] = len(graph.get("nodes", {}))
-    meta["edge_count"] = len(graph.get("edges", {}))
-    write_json(meta_path, meta)
+    # v3.9.1: meta 更新失败不应阻断主写入
+    try:
+        meta_path = os.path.join(ws_dir, "meta.json")
+        meta = read_json(meta_path) or {}
+        meta["node_count"] = len(graph.get("nodes", {}))
+        meta["edge_count"] = len(graph.get("edges", {}))
+        write_json(meta_path, meta)
+    except Exception as e:
+        print(f"  ⚠ write_graph: meta update failed: {e}", file=sys.stderr)
 
 
 def read_meta(workspace=None):
@@ -403,7 +427,7 @@ def session_start(workspace=None):
     
     Returns: dict with session briefing
     """
-    meta = read_meta(workspace or "default")
+    meta = read_meta(workspace)  # v3.9.1: 移除 "or default"，与 write_meta 一致避免跨空间污染
     previous_count = meta.get("session_count", 0)
     meta["session_count"] = previous_count + 1
     meta["last_session_start"] = get_timestamp()
@@ -634,6 +658,7 @@ def get_health_dir():
     data_dir = config.get("data_dir", DEFAULT_DATA_DIR)
     h_dir = os.path.join(data_dir, "health")
     ensure_dir(h_dir)
+    return h_dir  # v3.9.1: ensure_dir 返回 None，补 return
     return h_dir
 
 

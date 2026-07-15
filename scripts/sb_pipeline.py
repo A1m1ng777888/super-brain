@@ -63,16 +63,16 @@ DECAY_CONFIG = {
 
 # Definition indicators: patterns that suggest factual/definitional content
 DEFINITION_PATTERNS = [
-    r'(?:是|等于|意味着|定义为|指的是|就是|也就是)',
+    r'(?:等于|意味着|定义为|指的是|就是|也就是)',  # v3.9.2: 去掉裸"是"防"是的"误判
     r'(?:因为|所以|由于|导致|引起|使得)',
     r'(?:必须|需要|要求|应该|应当)',
     r'(?:规则|原则|定律|定理|公式|算法)',
     r'(?:架构|设计|方案|策略|模式|流程)',
     r'(?:版本|配置|环境|依赖|安装|部署)',
-    r'(?:is|are|equals|means|defined as|refers to)',
-    r'(?:because|therefore|due to|causes|results in)',
-    r'(?:must|should|requires|needs to)',
-    r'(?:rule|principle|law|theorem|formula|algorithm)',
+    r'(?:\bis\b|\bare\b|\bequals\b|\bmeans\b|\bdefined as\b|\brefers to\b)',  # v3.9.2: 加词边界
+    r'(?:\bbecause\b|\btherefore\b|\bdue to\b|\bcauses?\b|\bresults in\b)',
+    r'(?:\bmust\b|\bshould\b|\brequires?\b|\bneeds to\b)',
+    r'(?:\brule\b|\bprinciple\b|\blaw\b|\btheorem\b|\bformula\b|\balgorithm\b)',
 ]
 
 # Chitchat indicators: patterns that suggest casual conversation
@@ -354,8 +354,12 @@ def cleanup_memories(workspace=None, dry_run=False, force=False):
         backup_path = os.path.join(ws_dir, f"memories_backup_{now.strftime('%Y%m%d_%H%M%S')}.json")
         try:
             write_json(backup_path, memories)
-        except Exception:
-            pass  # Non-critical, proceed
+        except Exception as e:
+            # v3.9.2: 备份失败即中止，防止无安全网下覆写主存储
+            print(f"  ⚠ cleanup_memories: backup failed, aborting: {e}", file=sys.stderr)
+            return {"deprecated": [], "deleted": [], "skipped": 0,
+                    "total": len(memories), "timestamp": now.isoformat(),
+                    "dry_run": dry_run, "error": f"backup_failed: {e}"}
     
     report = {
         "deprecated": [],

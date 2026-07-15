@@ -1,5 +1,23 @@
 # Changelog — Super Brain 超脑
 
+## v3.9.3 (2026-07-15) — GLM-5.2 外部审阅终结版
+
+### GLM-5.2 外部审阅里程碑
+累计审阅 15 个核心模块（~6,150 行），发现并修复 40+ 真实缺陷，发布 11 个版本（v3.8.3–v3.9.3）。
+审阅终止条件达成：连续两模块零 P0、P1 密度 < 1/364 行、零新静默数据丢失。
+
+### 本轮修复（Top 5 + 扩充，pack-13~19）
+**sb_core.py** — 基础设施 8 项：read_graph 损坏备份、load_config deepcopy + 备份、双写 try/except、session_start 工作空间一致、health_dir 返回值、ensure_workspace name、switch_workspace 校验
+**sb_graph.py** — 图谱 2 项：source_memory 单复数 schema 统一、delete_node 返回 node_id
+**sb_pipeline.py** — 管线 2 项：定义正则加词边界、cleanup backup abort
+**sb_perception.py** — 感知 1 项：action_patterns 否定极性
+**sb_context.py** — 上下文 2 项：best_sim 初始化 + tf_idf 传参 + ternary 外移
+**sb_longterm.py** — 长期记忆 4 项：索引接线路径/结构双重对齐、infer_memory_type 补 factual、decision 标签修正
+
+### 搁置
+6 个低风险模块（superbrain/selfcheck/skillopt/token_roi/trace/capability）永久搁置——失败模式为直接报错，非静默损坏。
+sb_orchestrator.py 审阅零修复——终止条件达成点。
+
 ## v3.8.8 (2026-07-14)
 
 ### 修复 — 模糊纠正 + 反污染加固（pack-08 GLM-5.2 审阅）

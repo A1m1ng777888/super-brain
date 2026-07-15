@@ -133,9 +133,15 @@ def information_value_assessment(text, context=None):
                        0.15 if has_chinese_terms else 0])
     
     # Actionability: check for action verbs
+    # v3.9.2: 负向后行断言 + \b 词边界防否定极性误判（与 sb_reasoning pack-11 同型修复）
     action_patterns = ['需要', '应该', '必须', '创建', '配置', '安装', '部署', '修复',
                        'need', 'should', 'must', 'create', 'configure', 'install', 'fix']
-    has_action = any(p in text.lower() for p in action_patterns)
+    _t = text.lower()
+    def _action_hit(p):
+        if p.isascii():
+            return bool(re.search(r'\b' + re.escape(p) + r'\b', _t))
+        return bool(re.search(r'(?<![不没无])' + re.escape(p), _t))
+    has_action = any(_action_hit(p) for p in action_patterns)
     action_score = 0.15 if has_action else 0.0
     
     # Combine with length penalty

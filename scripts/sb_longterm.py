@@ -240,7 +240,9 @@ def auto_ingest(text, source_session=None, workspace=None):
         query_results = [{"id": m["id"], "content": m["content"][:80], "score": round(s, 3)} for m, s, _ in results]
     
     return {
-        "action": "learned" if decision == "learn" else "learned_and_queried",
+        "action": ("learned" if decision == "learn" else 
+                   "learned_and_queried" if decision == "both" else 
+                   f"learned_unknown({decision})"),  # v3.9.3: 防意外值标签误导
         "reason": perception["reasoning"],
         "stored": stored,
         "stored_count": len(stored),
@@ -259,7 +261,7 @@ def _infer_memory_type(point_type, category):
         else:
             return "fact"
     else:
-        return "context"
+        return "fact" if point_type == "factual" else "context"  # v3.9.3: 非 definition 类别下保留 factual
 
 
 def _extract_entity(full_text, point_text):
@@ -371,9 +373,9 @@ def zero_cost_retrieve(query, workspace=None, limit=5):
     if wn._total_docs == 0:
         build_word_network_from_memories(active, workspace)
 
-    # v3.8.9: 用 build_index 产出的 keyword_index 做候选过滤（O(k) → reduced O(n)）
+    # v3.8.9: 用 build_index 产出的 keyword_index 做候选过滤
     # 无索引时回退全扫；有索引时只在候选集中做 ternary 重排。
-    index_path = os.path.join(get_workspace_dir(workspace), "longterm_index.json")
+    index_path = os.path.join(get_workspace_dir(workspace), "index.json")
     idx = read_json(index_path)
     ki = idx.get("keyword_index", {}) if idx else {}
     if ki and query_tokens:
@@ -468,6 +470,7 @@ def build_index(workspace=None):
         "built_at": get_timestamp(),
         "memory_count": len(active),
         "inverted_index_size": len(inverted_index),
+        "keyword_index": dict(inverted_index),  # v3.9.3: 供 zero_cost_retrieve 候选过滤
         "word_network_stats": wn.stats(),
         "ternary_hashes_computed": sum(1 for m in active if m.get("ternary_hash") is not None)
     }

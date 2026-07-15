@@ -74,6 +74,7 @@ def topic_cluster(workspace=None, num_clusters=None, min_similarity=0.3):
             sim_cache[(i, j)] = combined
     
     # Agglomerative clustering
+    best_sim = 0  # v3.9.3: 初始化避免 n=1 时 NameError
     while len(clusters) > 1:
         # Find most similar pair of clusters (single-linkage)
         best_sim = -1
@@ -190,6 +191,8 @@ def trace_thread(topic_or_memory_id, workspace=None, max_depth=10):
     
     # Find all memories related to the seed
     seed_tokens = set(tokenize(seed_content + " " + seed_entity))
+    h1 = ternary_hash(seed_content)  # v3.9.3: 循环外预计算
+    all_docs = [tokenize(m.get("content", "") + " " + m.get("entity", "")) for m in active]
     
     thread_members = []
     for mem in active:
@@ -200,12 +203,11 @@ def trace_thread(topic_or_memory_id, workspace=None, max_depth=10):
         overlap_ratio = len(overlap) / max(len(seed_tokens), 1)
         
         # Check TF-IDF similarity
-        tfidf_sim = tf_idf_cosine_similarity(seed_content, mem.get("content", ""))
+        tfidf_sim = tf_idf_cosine_similarity(seed_content, mem.get("content", ""), all_docs)
         
         # Check ternary hash similarity
-        h1 = ternary_hash(seed_content)
         h2 = mem.get("ternary_hash") or ternary_hash(mem.get("content", ""))
-        th_sim = ternary_similarity(h1, h2)
+        th_sim = ternary_similarity(h1, h2)  # h1 已在上方预计算
         
         # Combined relevance
         relevance = overlap_ratio * 0.4 + tfidf_sim * 0.35 + th_sim * 0.25

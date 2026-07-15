@@ -138,7 +138,7 @@ def add_edge(source_name_or_id, target_name_or_id, edge_type="related_to",
         "target": target_node["id"],
         "type": edge_type,
         "weight": weight,
-        "source_memory": source_memory,
+        "source_memories": [source_memory] if source_memory else [],  # v3.9.2: 统一为复数键
         "created_at": get_timestamp(),
         "updated_at": get_timestamp()
     }
@@ -289,7 +289,7 @@ def delete_node(node_id_or_name, workspace=None):
         del graph["edges"][eid]
 
     write_graph(graph, workspace)
-    return True
+    return node_id  # v3.9.2: 返回被删节点 ID，供调用方级联清理 related_nodes
 
 
 def get_stats(workspace=None):
