@@ -1,4 +1,8 @@
-"""prepublish_strip_local_paths.py 的回归测试（纯标准库 unittest，零依赖）。
+"""
+prepublish_strip_local_paths.py 的回归测试（纯标准库 unittest，零依赖）。
+
+Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
+Author: A1m1ng777888
 
 覆盖 v3.8.5 修补的真 bug：
 - P0-1: DEFAULT_VAULT_PATH 赋值行带尾部注释时，仍应走 VAULT 分支产出
