@@ -343,6 +343,38 @@ def cross_session_associate(memory_id, workspace=None, min_strength=0.2):
     }
 
 
+def _ensure_fresh_index(index_path, active_memories, workspace):
+    """
+    v3.9.4 (P0): 索引自动维护——缺失或陈旧时按需重建。
+
+    修复"build_index 的 keyword_index 修复已落地，但 14 个 workspace
+    零 index.json、zero-cost 恒暴力扫"的名实不符问题。
+
+    判定陈旧（任一即重建）：
+      1. index.json 不存在
+      2. memories.json 比 index.json 新（mtime 对比）
+      3. 索引记录的 memory_count 与当前 active 数不符
+
+    best-effort：重建失败返回 None，调用方回退全扫，不炸检索。
+    注意：build_index 内部会回写 ternary_hash（仅在重建时，非常规检索路径）。
+    """
+    try:
+        idx = read_json(index_path) if os.path.exists(index_path) else None
+        need = idx is None
+        if not need:
+            mem_path = os.path.join(os.path.dirname(index_path), "memories.json")
+            if os.path.exists(mem_path) and os.path.getmtime(mem_path) > os.path.getmtime(index_path):
+                need = True
+            elif idx.get("memory_count") != len(active_memories):
+                need = True
+        if need:
+            build_index(workspace)
+            idx = read_json(index_path)
+        return idx
+    except Exception:
+        return None
+
+
 def zero_cost_retrieve(query, workspace=None, limit=5):
     """
     Zero-cost semantic retrieval using pre-computed indexes.
@@ -367,16 +399,12 @@ def zero_cost_retrieve(query, workspace=None, limit=5):
     # Compute query ternary hash
     query_ternary = ternary_hash(query)
     query_tokens = set(tokenize(query))
-    
-    # Use word network for query expansion
-    wn = get_word_network(workspace)
-    if wn._total_docs == 0:
-        build_word_network_from_memories(active, workspace)
 
-    # v3.8.9: 用 build_index 产出的 keyword_index 做候选过滤
-    # 无索引时回退全扫；有索引时只在候选集中做 ternary 重排。
+    # v3.9.4 (P0): 索引自动维护——缺失或陈旧时按需重建（best-effort，失败回退全扫）。
+    # 修复"build_index 的 keyword_index 修复已落地但 14 个 workspace 零 index.json、
+    # zero-cost 恒暴力扫"。原 :372-374 的词网络预热死代码（打分路径不用）已删。
     index_path = os.path.join(get_workspace_dir(workspace), "index.json")
-    idx = read_json(index_path)
+    idx = _ensure_fresh_index(index_path, active, workspace)
     ki = idx.get("keyword_index", {}) if idx else {}
     if ki and query_tokens:
         candidate_ids = set()

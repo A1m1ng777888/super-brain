@@ -1,5 +1,18 @@
 # Changelog — Super Brain 超脑
 
+## v3.9.4 (2026-07-17) — P0 性能与安全修复（五维度审阅驱动）
+
+### 审阅
+砚（K3）主控 + 5 并行只读子代理，对 v3.9.3 做代码质量/架构/安全/性能/测试五维度横向审阅（与 GLM-5.2 纵向逐模块审阅互补），82 项发现（高 20/中 31/低 31），7 项高危人工抽查全属实，整体 5.9/10。详见 `super-brain-完整审阅报告.md`。
+
+### P0 修复（3 项，263 项回归零失败）
+- **搜索热路径 O(n²·terms) 退化**：`sb_search.py` 预建 IDF 文档频率表（`_tfidf_cosine_precomputed`）+ `fuzzy_match` 长度差预筛（编辑距离下界剪枝，放在 substring 快速路径之后不误杀）。n=500 实测：21s → 0.6s（35 倍）；n=174：2.8s → 0.19s（15 倍）。
+- **零成本索引自动维护**：`sb_longterm.py` 新增 `_ensure_fresh_index()`——缺失/陈旧/计数不符时自动重建；`zero_cost_retrieve` 首次含重建 1.4s，后续 **10ms**（keyword_index 11,936 tokens 候选过滤）。修复前全部 14 个 workspace 零 index.json。
+- **测试文件强制数据目录隔离**：`test_v2.py`/`test_v36.py` 在 `from sb_core import` 前强制 `os.environ["SUPERBRAIN_DATA_DIR"] = mkdtemp`（不用 setdefault 避免已有 env 时静默失效）；`sb_orchestrator.py:1727` 内嵌测试硬编码路径 → `get_workspace_dir("default")`。
+
+### 附属修复（P1-4，收尾顺手修）
+- **版本号单一来源**：`sb_core.py` 新增 `VERSION = "3.9.4"` 模块常量；`DEFAULT_CONFIG["version"]` 引用 VERSION；`superbrain.py` 三处版本兜底（`'1.0.0'`/`'1.0.0'`/`'3.2.2'`）统一改为 `config.get('version', sb_core.VERSION)`。
+
 ## v3.9.3 (2026-07-15) — GLM-5.2 外部审阅终结版
 
 ### GLM-5.2 外部审阅里程碑

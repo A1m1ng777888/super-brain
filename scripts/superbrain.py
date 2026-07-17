@@ -258,7 +258,7 @@ def cmd_init(args):
     print("SuperBrain initialized successfully.")
     print(f"  Data directory: {config.get('data_dir', DEFAULT_DATA_DIR)}")
     print(f"  Current workspace: {config.get('current_workspace', 'default')}")
-    print(f"  Version: {config.get('version', '1.0.0')}")
+    print(f"  Version: {config.get('version', sb_core.VERSION)}")
     print("\nWorkspace 'default' is ready. Use 'workspace create' to add more.")
 
 
@@ -727,7 +727,7 @@ def cmd_stats(args):
 
     print("=== SuperBrain Statistics ===")
     print(f"Workspace: {config.get('current_workspace', 'default')}")
-    print(f"Version: {config.get('version', '1.0.0')}")
+    print(f"Version: {config.get('version', sb_core.VERSION)}")
     print()
     print(f"Memory:")
     print(f"  Total: {mem_stats['total']} | Active: {mem_stats['active']} | Archived: {mem_stats['archived']}")
@@ -762,7 +762,7 @@ def cmd_token_roi(args):
 def cmd_version(args):
     """Show version information."""
     config = load_config()
-    print(f"SuperBrain version {config.get('version', '3.2.2')}")
+    print(f"SuperBrain version {config.get('version', sb_core.VERSION)}")
     print(f"Release date: 2026-07-02")
     print(f"Features: memory (v3.1 anti-pollution), search (v3.0 ternary hash+fuzzy), "
           f"perception (v3.0), pipeline (v3.1 cleanup), reasoning (v3.1 warmup), "

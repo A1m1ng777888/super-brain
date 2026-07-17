@@ -1724,7 +1724,9 @@ def run_tests():
     data["continuation_state"]["current_count"] = 1
     data["continuation_state"]["active"] = True
     # Save to disk for should_continue_goal to read
-    ws_dir = os.path.join(os.path.expanduser("~"), ".workbuddy", "super-brain", "workspaces", "default")
+    # v3.9.4 (P0): 改用 get_workspace_dir 走 env/config 解析，避免硬编码
+    # ~/.workbuddy/super-brain 污染生产数据（get_workspace_dir 已 import）。
+    ws_dir = get_workspace_dir("default")
     os.makedirs(ws_dir, exist_ok=True)
     orch_path = os.path.join(ws_dir, "orchestrator.json")
     write_json(orch_path, data)

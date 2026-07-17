@@ -21,9 +21,12 @@ DEFAULT_DATA_DIR = os.path.expanduser(
     os.environ.get("SUPERBRAIN_DATA_DIR", "~/.workbuddy/super-brain")
 )
 
+# v3.9.4: 单一版本号来源（修复 DEFAULT_CONFIG/三处兜底四处漂移的审阅 P1-4）
+VERSION = "3.9.4"
+
 # Default config
 DEFAULT_CONFIG = {
-    "version": "3.8.1",
+    "version": VERSION,
     "data_dir": DEFAULT_DATA_DIR,
     "current_workspace": "default",
     "persona_workspace_path": None,  # v3.8.0: persona 层路径，None 时用默认 workspaces/persona/

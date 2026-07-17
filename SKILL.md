@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.9.3
+version: v3.9.4
 released: 2026-07-14
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.9.3。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷——记忆引擎加固（merge 数据丢失/时区/fuzzy 崩溃/反污染正则）、基础设施夯实（read_graph 备份/load_config deepcopy/双写非原子/health_dir 返回值/腐蚀恢复/工作空间一致性）、图谱层修复（schema 分裂/删除级联）、管线加固（正则词边界/备份 abort/否定极性跨模块修复）、推理引擎 4 项 P1、长期记忆索引接线、编排器审计。纯标准库零依赖、262 项回归全过。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、门控、审计、回滚、persona。"
+description: "Super Brain 超脑认知增强技能 v3.9.4。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷——记忆引擎加固（merge 数据丢失/时区/fuzzy 崩溃/反污染正则）、基础设施夯实（read_graph 备份/load_config deepcopy/双写非原子/health_dir 返回值/腐蚀恢复/工作空间一致性）、图谱层修复（schema 分裂/删除级联）、管线加固（正则词边界/备份 abort/否定极性跨模块修复）、推理引擎 4 项 P1、长期记忆索引接线、编排器审计。纯标准库零依赖、262 项回归全过。v3.9.4（P0 性能+安全修复）：搜索热路径 IDF 预建表化 + fuzzy 长度差预筛（n=500 从 21s→0.6s）、零成本索引自动维护（首次含重建后 10ms）、测试文件强制数据目录隔离、版本号单一来源。263 项回归零失败。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、门控、审计、回滚、persona。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.9.3
+# Super Brain (超脑) — 认知增强技能 v3.9.4
 
 ## 概述
 
@@ -681,6 +681,7 @@ input_schema:
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.9.4** | **2026-07-17** | **P0 性能与安全修复（五维度审阅驱动）：** ① 搜索热路径 O(n²·terms) 退化修复：`sb_search.py` 预建 IDF 文档频率表（`_tfidf_cosine_precomputed`）+ `fuzzy_match` 长度差预筛（编辑距离下界剪枝，放在 substring 快速路径之后不误杀）。n=500 实测从 21s 降至 0.6s（35 倍），n=174 从 2.8s 降至 0.19s（15 倍）。② 零成本索引自动维护：`sb_longterm.py` 新增 `_ensure_fresh_index()`——缺失/陈旧/计数不符时自动重建；`zero_cost_retrieve` 首次含重建 1.4s，后续 **10ms**（含 keyword_index 11936 tokens 候选过滤）。③ 测试文件强制数据目录隔离：`test_v2.py`/`test_v36.py` 在 `from sb_core import` 前强制 `os.environ["SUPERBRAIN_DATA_DIR"] = mkdtemp`；`sb_orchestrator.py:1727` 内嵌测试硬编码路径→`get_workspace_dir`。④ P1-4 版本号单一来源：`sb_core.py` 新增 `VERSION` 常量，`superbrain.py` 三处兜底统一引用。263 项回归零失败（49+71+92+36+7+8）。 |
 | **v3.8.5** | **2026-07-14** | **脱敏脚本加固（surgical 修补）：** 由 Tabbit Pro GLM-5.2 外部安全审阅发现并实跑验证 `prepublish_strip_local_paths.py` 的 `VAULT_ASSIGN_RE` 行尾 `$` 锚在尾部注释场景静默失配、fall-through 到 `DRIVE_PATH_RE` 降级为裸串 `~/ObsidianVault`（丢 `os.path.expanduser`，Windows 上 `~` 不展开）；`DRIVE_PATH_RE` 仅覆盖 Windows 盘符、漏 Unix 主目录路径（`/home/xxx` 等）；`file:///E:/` 盘符被误伤。修复：`VAULT_ASSIGN_RE` 允许可选尾注释 + 替换保留缩进；`DRIVE_PATH_RE` 负向后行断言排除 `/`；新增 `UNIX_HOME_RE` 覆盖 Unix 路径。新增 `test_prepublish_strip.py` 8 项 unittest 回归。纯标准库零依赖、不改默认行为。strip 8/8 回归全过，核心套件 4/5 通过（test_superbrain 的 `total==5` 为与实时记忆数耦合的既有脆弱断言、与本补丁无关）。 |
 | **v3.8.4** | **2026-07-14** | **检索融合加固（surgical 修补）：** 由 Tabbit Pro GLM-5.2 外部算法逻辑审阅发现 `sb_search.py` 的 `expanded_score` 用 `len(expanded_tokens) > len(query_tokens)`（set-vs-list）误判「扩展是否发生」——query 含重复 token 时两长度拉平，即使词网真扩展新 token，条件也为 False，第六路信号静默关闭。修复：记录 `base_token_count`（去重基数），改以 `len(expanded_tokens) > base_token_count`（set-vs-set）判断。新增确定性回归测试（重复 token 查询 + 仅含扩展 token 的记忆，旧逻辑漏召回/修复后召回）。纯标准库零依赖、不改默认输出。254/254 + 1 项回归全过，零回归。 |
 | **v3.8.3** | **2026-07-14** | **图谱导出加固（surgical 修补）：** 由 Tabbit Pro GLM-5.2 外部审阅发现 `sb_mermaid.py` 的 node id 未净化（特殊字符 id 静默产出非法 Mermaid 图）、`read_graph` 缺守卫。修复：引入 `_safe_nid()` + `orig_to_safe` 映射净化标识符；`read_graph` 返 None/非 dict 走占位图；方向非法兜底 LR、`_sanitize` 处理换行/`]`、悬空边注释、去 `eid` 死代码。零依赖、不改默认输出、不影响合法输入。254/254 + 11 项回归全过，零回归。 |

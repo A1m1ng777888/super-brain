@@ -14,6 +14,11 @@ import tempfile
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
+# v3.9.4 (P0): 强制数据目录隔离——本套件此前无 SUPERBRAIN_DATA_DIR 重定向，
+# 直接读写生产数据根目录。强制赋值（不用 setdefault，避免已有 env 时静默失效），
+# 且必须在 from sb_core import 之前（DEFAULT_DATA_DIR 在模块加载时定型）。
+os.environ["SUPERBRAIN_DATA_DIR"] = tempfile.mkdtemp(prefix="sb_test_v2_")
+
 from sb_core import ensure_workspace, write_json, read_json, load_config, save_config, get_timestamp, generate_id
 from sb_trace import (
     compute_weighted_score, record_trace, add_explicit_feedback,

@@ -19,8 +19,15 @@ Author: A1m1ng777888
 import os
 import sys
 import shutil
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# v3.9.4 (P0): 强制数据目录隔离——本套件此前硬编码 ~/.workbuddy/super-brain，
+# 直接读写生产数据根目录（注释"不触碰生产数据"名不副实）。强制赋值（不用
+# setdefault，避免已有 env 时静默失效），且必须在 from sb_core import 之前
+# （DEFAULT_DATA_DIR 在模块加载时定型）。
+os.environ["SUPERBRAIN_DATA_DIR"] = tempfile.mkdtemp(prefix="sb_test_v36_")
 
 from sb_core import ensure_workspace, read_memories, write_memories
 from sb_memory import add_memory, get_context, MEMORY_TYPES
@@ -32,12 +39,7 @@ from sb_gating import (
     DEFAULT_THRESHOLD, DEFAULT_CAP
 )
 
-WS = "test"
-DATA_ROOT = os.path.join(
-    os.path.dirname(os.path.expanduser("~")),
-    ".workbuddy", "super-brain", "workspaces"
-)
-WS_DIR = os.path.join(DATA_ROOT, WS)
+WS = "test"  # workspace 逻辑名（非路径），ensure_workspace(WS) 使用
 
 PASS = 0
 FAIL = 0

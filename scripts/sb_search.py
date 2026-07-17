@@ -335,7 +335,13 @@ def fuzzy_match(query, target, max_distance=None):
     # Check substring
     if query in target or target in query:
         return (True, 0.9)
-    
+
+    # v3.9.4: 长度差预筛——编辑距离 ≥ |len(query)-len(target)|，
+    # 长度差超过 max_distance 必然不匹配，安全剪枝（放在 substring 检查之后，
+    # 不误杀子串命中）。n=500 时可将 Levenshtein 调用量削减 90%+。
+    if abs(len(query) - len(target)) > max_distance:
+        return (False, 0.0)
+
     dist = levenshtein_distance(query, target)
     if dist <= max_distance:
         max_len = max(len(query), len(target))
@@ -469,6 +475,36 @@ def tf_idf_cosine_similarity(text1, text2, all_docs=None):
     return dot_product / (mag1 * mag2)
 
 
+def _tfidf_cosine_precomputed(tf1, tf2, doc_freq, n_docs):
+    """
+    v3.9.4: TF-IDF cosine 的预建表版本——与 tf_idf_cosine_similarity 同公式，
+    但 IDF 从预建的 doc_freq 查表，消除 search_memories 热路径中
+    「每候选 × 每 term 全库扫 doc_freq」的 O(n²·terms) 退化。
+
+    等价性：doc_freq 预建语义（每文档对 term 至多计 1）与原实现
+    `sum(1 for doc in all_docs if term in doc)` 完全一致；term 缺失时
+    两者都得 0，浮点运算序列相同，结果 bit 级一致。
+
+    Args:
+        tf1/tf2: Counter 词频（调用方已 tokenize）
+        doc_freq: 预建文档频率表（term -> 包含该 term 的文档数）
+        n_docs: 语料文档总数 N
+    """
+    all_terms = set(tf1.keys()) | set(tf2.keys())
+    idf = {t: math.log((n_docs + 1) / (doc_freq.get(t, 0) + 1)) + 1 for t in all_terms}
+
+    vec1 = {term: tf1[term] * idf.get(term, 1.0) for term in tf1}
+    vec2 = {term: tf2[term] * idf.get(term, 1.0) for term in tf2}
+
+    dot_product = sum(vec1.get(term, 0) * vec2.get(term, 0) for term in all_terms)
+    mag1 = math.sqrt(sum(v ** 2 for v in vec1.values()))
+    mag2 = math.sqrt(sum(v ** 2 for v in vec2.values()))
+
+    if mag1 == 0 or mag2 == 0:
+        return 0.0
+    return dot_product / (mag1 * mag2)
+
+
 def keyword_match_score(query_tokens, content_tokens):
     """
     Calculate keyword match score (overlap ratio).
@@ -540,6 +576,17 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
     # Build corpus for TF-IDF
     all_docs = [tokenize(m.get("content", "")) for m in memories]
 
+    # v3.9.4: 预建 IDF 文档频率表——消除热路径 O(n²·terms) 退化。
+    # 原实现每条候选记忆都在 tf_idf_cosine_similarity 内对每个 term 全库扫
+    # doc_freq（n=500 实测 ~21s/query）；预建一次后查询只查表。
+    # doc_freq 语义（每文档对 term 至多计 1）与原实现逐项等价。
+    n_docs = len(all_docs)
+    doc_freq = Counter()
+    for _toks in all_docs:
+        for _term in set(_toks):
+            doc_freq[_term] += 1
+    query_tf = Counter(query_tokens)
+
     candidates_raw = []
     for i, memory in enumerate(memories):
         content = memory.get("content", "")
@@ -553,8 +600,11 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
             mem_simhash = simhash(full_text)
         sh_score = simhash_similarity(query_simhash, mem_simhash)
 
-        # 2. TF-IDF cosine similarity (precise)
-        tfidf_score = tf_idf_cosine_similarity(query, full_text, all_docs)
+        # 2. TF-IDF cosine similarity (precise) — v3.9.4: 预建 doc_freq 查表。
+        # 注意 tf2 仍对 full_text（含 entity）现场 tokenize，与原实现保持一致
+        # （all_docs/doc_freq 只含 content，边界 CJK bigram 行为不变）。
+        tfidf_score = _tfidf_cosine_precomputed(
+            query_tf, Counter(tokenize(full_text)), doc_freq, n_docs)
 
         # 3. Keyword match (with v3.0.0 expanded tokens)
         kw_score = keyword_match_score(query_tokens, content_tokens)
