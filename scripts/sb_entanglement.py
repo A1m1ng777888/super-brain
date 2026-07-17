@@ -31,16 +31,13 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sb_core import read_memories, read_graph, write_json, read_json, ensure_workspace, get_timestamp, read_meta
+from sb_core import read_memories, read_graph, write_json, read_json, ensure_workspace, \
+    get_timestamp, read_meta, WARMUP_MEMORY_THRESHOLD, WARMUP_SESSION_THRESHOLD  # v3.9.5 P2-9
 from sb_search import (
     tokenize, ternary_hash, ternary_similarity, 
     tf_idf_cosine_similarity, WordNetwork, get_word_network,
     build_word_network_from_memories
 )
-
-# v3.1.0: Cold start gating (mirrors sb_reasoning thresholds)
-WARMUP_MEMORY_THRESHOLD = 15
-WARMUP_SESSION_THRESHOLD = 3
 
 
 def _is_entanglement_warmup(workspace=None):

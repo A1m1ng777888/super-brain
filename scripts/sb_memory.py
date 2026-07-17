@@ -408,11 +408,12 @@ def merge_memories(id1, id2, workspace=None):
     return keeper
 
 
-def search(query, limit=10, workspace=None, update_access_stats=True):
+def search(query, limit=10, workspace=None, update_access_stats=False):
     """
     Search memories using hybrid retrieval.
     v2.1.0: time-aware filtering — expired memories get slight score penalty.
     R4 修复 (2026-07-10): update_access_stats 参数化写副作用，调用方可禁用。
+    v3.9.5 P2-11: 默认关 access 回写（读路径不带写副作用），调用方显式 opt-in。
     R5 修复 (2026-07-10): 过期判断加日期格式校验，非 YYYY-MM-DD 不误判。
     Returns list of results with scores.
     """

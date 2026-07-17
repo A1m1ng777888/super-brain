@@ -28,6 +28,7 @@ Author: A1m1ng777888
 
 import sys
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -35,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sb_core import (
     read_memories, write_memories, read_meta, update_meta, get_timestamp,
-    read_json, write_json, get_workspace_dir, generate_id
+    read_json, write_json, get_workspace_dir, generate_id, DEFAULT_DATA_DIR
 )
 
 # --- Defaults -------------------------------------------------------------
@@ -454,3 +455,111 @@ def get_status(workspace=None):
         "promoted": len(promoted),
         "promotion_ratio": round(len(promoted) / max(len(active), 1), 3),
     }
+
+
+# ============================================================================
+# v3.9.5: 硬步骤门控设施（从 superbrain.py 下沉到领域层）
+# 修复审阅 P1-5（门控加固）+ P2-10（策略下沉：门控策略不应在 CLI 层）
+# ============================================================================
+
+HARDSTEP_STATE_FILE = os.path.join(DEFAULT_DATA_DIR, ".hardstep.json")
+HARDSTEP_WINDOW_SECONDS = 30 * 60
+HARDSTEP_OVERRIDES_MAX = 200  # v3.9.5: overrides 环形截断
+
+
+def _hardstep_load():
+    """读取硬步骤状态文件（best-effort）。"""
+    try:
+        return read_json(HARDSTEP_STATE_FILE) or {}
+    except Exception:
+        return {}
+
+
+def _hardstep_save(state):
+    """v3.9.5: 改用 sb_core.write_json 原子写，替代裸 json.dump。"""
+    return write_json(HARDSTEP_STATE_FILE, state)
+
+
+def mark_search_done(query=""):
+    """记录一次 memory search，解锁后续写入命令。"""
+    state = _hardstep_load()
+    state["last_search_ts"] = time.time()
+    state["last_search_query"] = (query or "")[:200]
+    ok = _hardstep_save(state)
+    if not ok:
+        print("⚠️ [HARD-STEP] mark_search_done 写入失败，后续写入可能被误拦截",
+              file=sys.stderr)
+    return ok
+
+
+def enforce_hard_step_guard(force, content="", command=""):
+    """拦截未先检索的写入命令。
+
+    v3.9.5 加固：
+    - _hardstep_save 改用 write_json 原子写（修复裸 json.dump）
+    - last_search_ts 未来时间拒绝（阻止手填绕过，修复审阅安全中危项）
+    - overrides 环形截断 200 条（修复 .hardstep.json 无限膨胀）
+    """
+    if force:
+        state = _hardstep_load()
+        overrides = state.get("overrides") or []
+        overrides.append({
+            "ts": time.time(),
+            "command": command or "unknown",
+            "content_preview": (content or "")[:100],
+        })
+        # v3.9.5: 环形截断——防 .hardstep.json 无限膨胀
+        if len(overrides) > HARDSTEP_OVERRIDES_MAX:
+            overrides = overrides[-HARDSTEP_OVERRIDES_MAX:]
+        state["overrides"] = overrides
+        _hardstep_save(state)
+        print("⚠️ [HARD-STEP OVERRIDE] 已用 --force 跳过「先检索后入库」强制校验（已写入审计）。",
+              file=sys.stderr)
+        return
+
+    state = _hardstep_load()
+    last = state.get("last_search_ts")
+
+    # v3.9.5: 未来时间拒绝——阻止手填时间戳绕过门控
+    if isinstance(last, (int, float)) and last > time.time() + 3600:
+        print("⚠️ [HARD-STEP] 检测到未来时间戳（疑为绕过门控），已重置检索状态。", file=sys.stderr)
+        state["last_search_ts"] = None
+        state.pop("last_search_query", None)
+        _hardstep_save(state)
+        last = None
+
+    satisfied = last is not None and (time.time() - last) <= HARDSTEP_WINDOW_SECONDS
+    if satisfied:
+        last_query = state.get("last_search_query", "")
+        if content and last_query:
+            try:
+                from sb_search import ternary_hash, ternary_similarity
+                sim = ternary_similarity(ternary_hash(last_query), ternary_hash(content))
+                if sim < 0.05:
+                    print(f"⚠️ [HARD-STEP 警告] 上次检索「{last_query[:40]}」与入库内容相关性低 (sim={sim:.3f})",
+                          file=sys.stderr)
+                    print("  建议先检索相关主题再入库；如确属不同主题，加 --force 豁免。",
+                          file=sys.stderr)
+            except Exception:
+                pass
+        return
+
+    elapsed = int(time.time() - last) if last else None
+    msg = (
+        "\n⛔ [超脑硬步骤校验失败] 入库前必须先执行记忆检索。\n"
+        "────────────────────────────────────────────────────────────\n"
+        "依据 pre-commit 级硬步骤约定（2026-07-08）：凡涉及技术 / 项目 / 偏好的写入，\n"
+        "必须先运行一次 `SB memory search \"<主题>\"` 召回相关记忆。\n\n"
+        "解决方式（任选其一）：\n"
+        "  1) 先运行：SB memory search \"<相关主题>\"\n"
+        "  2) 显式豁免：在原命令后加 --force\n"
+        "     （--force 会被审计记录，仅用于自动化 / 明确豁免场景）\n"
+    )
+    if last:
+        msg += (f"\n  诊断：上次检索在 {elapsed} 秒前，已超过 "
+                f"{HARDSTEP_WINDOW_SECONDS}s 任务窗口。\n")
+    else:
+        msg += "\n  诊断：本机从未记录到 memory search（无检索状态）。\n"
+    msg += "────────────────────────────────────────────────────────────\n"
+    print(msg, file=sys.stderr)
+    sys.exit(2)

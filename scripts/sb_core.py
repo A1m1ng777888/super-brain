@@ -22,7 +22,11 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 )
 
 # v3.9.4: 单一版本号来源（修复 DEFAULT_CONFIG/三处兜底四处漂移的审阅 P1-4）
-VERSION = "3.9.4"
+VERSION = "3.9.5"
+
+# v3.9.5 P2-9: warmup 常量统一来源（消除 sb_reasoning/sb_entanglement 重复定义）
+WARMUP_MEMORY_THRESHOLD = 15
+WARMUP_SESSION_THRESHOLD = 3
 
 # Default config
 DEFAULT_CONFIG = {
@@ -308,9 +312,10 @@ def read_json(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
+    except (json.JSONDecodeError, IOError, UnicodeDecodeError) as e:
         # v3.4.3 fix: warn instead of silent None — prevents read_memories
         # from returning [] and causing write_memories to overwrite with loss
+        # v3.9.5 P1-8: 增捕 UnicodeDecodeError — 二进制/非 UTF-8 文件先前直接崩溃
         print(f"  ⚠ read_json: failed to parse {path}: {e}", file=sys.stderr)
         return None
 
@@ -320,9 +325,10 @@ def write_json(path, data):
 
     B6 修复 (2026-07-10): 原子写——先写 .tmp 再 os.replace，避免写入过程崩溃导致文件损坏。
     os.replace 是跨平台原子操作 (Windows/Linux/macOS 均支持)，崩溃时 .tmp 残留但不污染原文件。
+    v3.9.5 P1-6: tmp 名加 PID——双进程同 workspace 并发写时避免共用 .tmp 互踩。
     """
     ensure_dir(os.path.dirname(path))
-    tmp_path = path + ".tmp"
+    tmp_path = f"{path}.tmp.{os.getpid()}"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, path)  # 原子重命名
@@ -437,6 +443,10 @@ def session_start(workspace=None):
     write_meta(meta, workspace)
     
     # Check warmup status
+    # v3.9.5 P2-12 说明: 以下延迟 import 是避免循环依赖的刻意设计
+    # (sb_core 作为基础设施层, 但 session_briefing/health_check 等诊断函数
+    #  需要调用领域层如 sb_memory/sb_pipeline/sb_graph — 属于分层诊断职责而非核心 IO。
+    #  延迟 import 在函数体内做, 其余模块不因 sb_core 加载触发领域层初始化链。)
     from sb_memory import read_memories as _rmem
     memories = _rmem(workspace)
     active = [m for m in memories if m.get("status") == "active"]
@@ -463,7 +473,7 @@ def session_start(workspace=None):
     briefing = {
         "protocol": "T1_session_start",
         "session_number": meta["session_count"],
-        "warmup": active_count < 15 or meta["session_count"] < 3,
+        "warmup": active_count < WARMUP_MEMORY_THRESHOLD or meta["session_count"] < WARMUP_SESSION_THRESHOLD,
         "active_memories": active_count,
         "total_memories": len(memories),
         "unresolved_items": len(unresolved),

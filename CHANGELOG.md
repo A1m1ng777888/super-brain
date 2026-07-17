@@ -1,5 +1,22 @@
 # Changelog — Super Brain 超脑
 
+## v3.9.5 (2026-07-17) — P1+P2 系统性修复（五维度审阅完整闭环）
+
+### P1 修复
+- **硬步骤门控加固**：`sb_gating.py`（从 `superbrain.py` 策略下沉）—— `_hardstep_save` 改原子写、未来时间戳拒绝、overrides 环形截断 200 条
+- **并发写治理**：`sb_core.py write_json` tmp 名加 `os.getpid()`
+- **token_roi XSS**：`sb_token_roi.py` `html.escape` 转义所有用户内容
+- **关键路径补测**：新增 `test_p1.py`（15 项）——硬步骤 exit 2、损坏 JSON 恢复、persona 双层召回、RRF 融合、二进制 JSON 防护
+
+### P2 修复
+- **warmup 常量共享**：`WARMUP_MEMORY_THRESHOLD=15` / `WARMUP_SESSION_THRESHOLD=3` 移至 `sb_core.py`
+- **读路径写副作用**：`sb_memory.search update_access_stats` 默认 `False`
+- **分层依赖注释**：`sb_core.py` 诊断函数延迟 import 说明
+- **发布面收尾**：SKILL.md 通用化、prepublish TARGET_FILES 扩展至 20 项、dashboard CDN 降级
+
+### 测试
+278 项回归零失败（49+71+92+36+7+8+15）
+
 ## v3.9.4 (2026-07-17) — P0 性能与安全修复（五维度审阅驱动）
 
 ### 审阅

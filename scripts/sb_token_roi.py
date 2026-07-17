@@ -25,6 +25,7 @@ Author: A1m1ng777888
 import sys
 import os
 import json
+import html
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sb_core import read_memories, get_timestamp
@@ -348,10 +349,12 @@ def generate_dashboard_html(workspace=None, recent_days=None, output_path="token
     if negative:
         rows = []
         for m in negative[:10]:
+            # v3.9.5 P1-7: html.escape 防存储型 XSS（审阅中危项）
             rows.append(
-                f"<tr><td>{m['category']}</td><td title='{m['content_preview']}'>{m['content_preview'][:40]}…</td>"
+                f"<tr><td>{html.escape(m['category'])}</td>"
+                f"<td title='{html.escape(m['content_preview'], quote=True)}'>{html.escape(m['content_preview'][:40])}…</td>"
                 f"<td>{m['access_count']}</td><td>{m['net_benefit']:.1f}</td>"
-                f"<td class='rec'>{m['recommendation']}</td></tr>"
+                f"<td class='rec'>{html.escape(m['recommendation'])}</td></tr>"
             )
         negative_html = (
             "<div class='card full' style='margin-bottom:20px;border-color:#d85a30'>"
@@ -382,6 +385,7 @@ def generate_dashboard_html(workspace=None, recent_days=None, output_path="token
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>超脑 Token ROI 看板</title>
+<!-- v3.9.5 P2-13: Chart.js CDN with local degrade — 断开外网时图表降级无碍浏览 -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   *{{margin:0;padding:0;box-sizing:border-box}}

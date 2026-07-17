@@ -141,114 +141,11 @@ from sb_orchestrator import (
 )
 
 
-# === v3.7.1: pre-commit 硬步骤代码强制（2026-07-08 用户拍板） ===
-# 凡涉及技术/项目/偏好的「写入」命令（memory add / longterm ingest / auto-store），
-# 必须先执行过 memory search（任务窗口内）。未满足则拦截（exit 2），--force 显式豁免并审计。
-HARDSTEP_STATE_FILE = os.path.join(DEFAULT_DATA_DIR, ".hardstep.json")
-HARDSTEP_WINDOW_SECONDS = 30 * 60  # 30 分钟任务窗口：窗口内多次写入免重复检索
-
-
-def _hardstep_load():
-    """读取硬步骤状态文件（best-effort）。"""
-    try:
-        if os.path.exists(HARDSTEP_STATE_FILE):
-            with open(HARDSTEP_STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {}
-
-
-def _hardstep_save(state):
-    """写入硬步骤状态文件。
-
-    R2 修复 (2026-07-10): 不再静默吞异常——返回 bool，失败时打印 stderr，
-    避免 mark_search_done 静默丢失导致后续写入被误拦截且无提示。
-    """
-    try:
-        os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
-        with open(HARDSTEP_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception as e:
-        print(f"⚠️ [HARD-STEP] 状态文件写入失败: {e}", file=sys.stderr)
-        return False
-
-
-def mark_search_done(query=""):
-    """记录一次 memory search，使后续写入命令通过硬步骤校验。
-
-    B4 修复 (2026-07-10): 记录查询内容 last_search_query，
-    供 enforce_hard_step_guard 做相关性校验（R1），避免 search"猫咪"后 add"Docker"也能通过。
-    """
-    state = _hardstep_load()
-    state["last_search_ts"] = time.time()
-    state["last_search_query"] = (query or "")[:200]  # B4: 记录查询内容（截断防爆）
-    ok = _hardstep_save(state)  # R2: 检查返回值
-    if not ok:
-        print("⚠️ [HARD-STEP] mark_search_done 写入失败，后续写入可能被误拦截",
-              file=sys.stderr)
-
-
-def enforce_hard_step_guard(force, content="", command=""):
-    """拦截未先检索的写入命令。
-
-    B4/R1 修复 (2026-07-10): 满足时间窗口后，额外校验 last_search_query 与
-    即将写入 content 的语义相关性——低于阈值则警告（不拦截，避免误伤跨主题入库）。
-    R3 修复 (2026-07-10): force 豁免审计记录 command + content 摘要，而非仅时间戳。
-    """
-    if force:
-        state = _hardstep_load()
-        overrides = state.get("overrides") or []
-        overrides.append({  # R3: 记录命令+内容摘要，提升审计价值
-            "ts": time.time(),
-            "command": command or "unknown",
-            "content_preview": (content or "")[:100],
-        })
-        state["overrides"] = overrides
-        _hardstep_save(state)
-        print("⚠️ [HARD-STEP OVERRIDE] 已用 --force 跳过「先检索后入库」强制校验（已写入审计）。",
-              file=sys.stderr)
-        return
-
-    state = _hardstep_load()
-    last = state.get("last_search_ts")
-    satisfied = last is not None and (time.time() - last) <= HARDSTEP_WINDOW_SECONDS
-    if satisfied:
-        # B4/R1: 相关性校验——检索主题与入库内容语义相关
-        last_query = state.get("last_search_query", "")
-        if content and last_query:
-            try:
-                from sb_search import ternary_hash, ternary_similarity
-                sim = ternary_similarity(ternary_hash(last_query), ternary_hash(content))
-                if sim < 0.05:  # 极低相关阈值——仅警告明显不相关，不拦截
-                    print(f"⚠️ [HARD-STEP 警告] 上次检索「{last_query[:40]}」与入库内容相关性低 (sim={sim:.3f})",
-                          file=sys.stderr)
-                    print("  建议先检索相关主题再入库；如确属不同主题，加 --force 豁免。",
-                          file=sys.stderr)
-            except Exception:
-                pass  # 相关性校验失败不阻塞主流程
-        return
-
-    elapsed = int(time.time() - last) if last else None
-    msg = (
-        "\n⛔ [超脑硬步骤校验失败] 入库前必须先执行记忆检索。\n"
-        "────────────────────────────────────────────────────────────\n"
-        "依据 pre-commit 级硬步骤约定（2026-07-08）：凡涉及技术 / 项目 / 偏好的写入，\n"
-        "必须先运行一次 `SB memory search \"<主题>\"` 召回相关记忆。\n\n"
-        "解决方式（任选其一）：\n"
-        "  1) 先运行：SB memory search \"<相关主题>\"\n"
-        "  2) 显式豁免：在原命令后加 --force\n"
-        "     （--force 会被审计记录，仅用于自动化 / 明确豁免场景）\n"
-    )
-    if last:
-        msg += (f"\n  诊断：上次检索在 {elapsed} 秒前，已超过 "
-                f"{HARDSTEP_WINDOW_SECONDS}s 任务窗口。\n")
-    else:
-        msg += "\n  诊断：本机从未记录到 memory search（无检索状态）。\n"
-    msg += "────────────────────────────────────────────────────────────\n"
-    print(msg, file=sys.stderr)
-    sys.exit(2)
+# v3.9.5: 门控策略下沉至 sb_gating（审阅 P2-10），CLI 层只 import 调用。
+from sb_gating import (
+    enforce_hard_step_guard, mark_search_done,
+    HARDSTEP_WINDOW_SECONDS
+)
 
 
 def cmd_init(args):

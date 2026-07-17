@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.9.4
+version: v3.9.5
 released: 2026-07-14
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.9.4。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷——记忆引擎加固（merge 数据丢失/时区/fuzzy 崩溃/反污染正则）、基础设施夯实（read_graph 备份/load_config deepcopy/双写非原子/health_dir 返回值/腐蚀恢复/工作空间一致性）、图谱层修复（schema 分裂/删除级联）、管线加固（正则词边界/备份 abort/否定极性跨模块修复）、推理引擎 4 项 P1、长期记忆索引接线、编排器审计。纯标准库零依赖、262 项回归全过。v3.9.4（P0 性能+安全修复）：搜索热路径 IDF 预建表化 + fuzzy 长度差预筛（n=500 从 21s→0.6s）、零成本索引自动维护（首次含重建后 10ms）、测试文件强制数据目录隔离、版本号单一来源。263 项回归零失败。触发词：记住、记忆、回忆、推理、纠缠、感知、分类、入库、搜索知识、知识图谱、自检、门控、审计、回滚、persona。"
+description: "Super Brain 超脑认知增强技能 v3.9.5。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。278 项回归零失败。纯标准库零依赖。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.9.4
+# Super Brain (超脑) — 认知增强技能 v3.9.5
 
 ## 概述
 
@@ -681,6 +681,7 @@ input_schema:
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.9.5** | **2026-07-17** | **P1+P2 系统性修复（五维度审阅完整闭环）：** ① P1-5 硬步骤门控加固：`_hardstep_save` 改 `write_json` 原子写 + 未来时间戳拒绝 + overrides 环形截断(200 条) ② P2-10 策略下沉：`enforce_hard_step_guard`/`mark_search_done` 从 `superbrain.py` 移到 `sb_gating.py`（门控策略归领域层） ③ P1-6 并发写治理：`write_json` tmp 名加 `os.getpid()` ④ P1-7 token_roi XSS：`html.escape` 转义 `content_preview`/`category`/`recommendation` ⑤ P2-9 warmup 常量共享：`WARMUP_MEMORY_THRESHOLD=15/WARMUP_SESSION_THRESHOLD=3` 移至 `sb_core.py`，`sb_reasoning`/`sb_entanglement` 统一 import ⑥ P2-11 读路径写副作用：`sb_memory.search update_access_stats` 默认 `False` ⑦ P1-8 关键路径补测：新增 `test_p1.py`(15 项)——硬步骤 exit 2/损坏 JSON 恢复/persona 双层/RRF 融合/二进制防护 ⑧ P2-12 分层依赖注释 ⑨ P2-13 发布面收尾：SKILL.md「本地知识库v1」→ 通用值、`prepublish TARGET_FILES 20` 项、dashboard CDN 降级。278 项回归零失败（49+71+92+36+7+8+15）。 |
 | **v3.9.4** | **2026-07-17** | **P0 性能与安全修复（五维度审阅驱动）：** ① 搜索热路径 O(n²·terms) 退化修复：`sb_search.py` 预建 IDF 文档频率表（`_tfidf_cosine_precomputed`）+ `fuzzy_match` 长度差预筛（编辑距离下界剪枝，放在 substring 快速路径之后不误杀）。n=500 实测从 21s 降至 0.6s（35 倍），n=174 从 2.8s 降至 0.19s（15 倍）。② 零成本索引自动维护：`sb_longterm.py` 新增 `_ensure_fresh_index()`——缺失/陈旧/计数不符时自动重建；`zero_cost_retrieve` 首次含重建 1.4s，后续 **10ms**（含 keyword_index 11936 tokens 候选过滤）。③ 测试文件强制数据目录隔离：`test_v2.py`/`test_v36.py` 在 `from sb_core import` 前强制 `os.environ["SUPERBRAIN_DATA_DIR"] = mkdtemp`；`sb_orchestrator.py:1727` 内嵌测试硬编码路径→`get_workspace_dir`。④ P1-4 版本号单一来源：`sb_core.py` 新增 `VERSION` 常量，`superbrain.py` 三处兜底统一引用。263 项回归零失败（49+71+92+36+7+8）。 |
 | **v3.8.5** | **2026-07-14** | **脱敏脚本加固（surgical 修补）：** 由 Tabbit Pro GLM-5.2 外部安全审阅发现并实跑验证 `prepublish_strip_local_paths.py` 的 `VAULT_ASSIGN_RE` 行尾 `$` 锚在尾部注释场景静默失配、fall-through 到 `DRIVE_PATH_RE` 降级为裸串 `~/ObsidianVault`（丢 `os.path.expanduser`，Windows 上 `~` 不展开）；`DRIVE_PATH_RE` 仅覆盖 Windows 盘符、漏 Unix 主目录路径（`/home/xxx` 等）；`file:///E:/` 盘符被误伤。修复：`VAULT_ASSIGN_RE` 允许可选尾注释 + 替换保留缩进；`DRIVE_PATH_RE` 负向后行断言排除 `/`；新增 `UNIX_HOME_RE` 覆盖 Unix 路径。新增 `test_prepublish_strip.py` 8 项 unittest 回归。纯标准库零依赖、不改默认行为。strip 8/8 回归全过，核心套件 4/5 通过（test_superbrain 的 `total==5` 为与实时记忆数耦合的既有脆弱断言、与本补丁无关）。 |
 | **v3.8.4** | **2026-07-14** | **检索融合加固（surgical 修补）：** 由 Tabbit Pro GLM-5.2 外部算法逻辑审阅发现 `sb_search.py` 的 `expanded_score` 用 `len(expanded_tokens) > len(query_tokens)`（set-vs-list）误判「扩展是否发生」——query 含重复 token 时两长度拉平，即使词网真扩展新 token，条件也为 False，第六路信号静默关闭。修复：记录 `base_token_count`（去重基数），改以 `len(expanded_tokens) > base_token_count`（set-vs-set）判断。新增确定性回归测试（重复 token 查询 + 仅含扩展 token 的记忆，旧逻辑漏召回/修复后召回）。纯标准库零依赖、不改默认输出。254/254 + 1 项回归全过，零回归。 |
@@ -703,7 +704,7 @@ input_schema:
 | **v3.2.2** | 2026-07-02 | 前置编配评估提升至 SOUL.md Continuity 层：四问判断逻辑（上下文量/并行度/能力差异/隐含范围）始终在线，不依赖 skill 加载。Agent 自主快速判断→需要时才加载本 skill 执行 orchestrate 正式评估。 |
 | **v3.2.1** | 2026-07-02 | 前置编配评估协议：隐含范围识别（单句"搭建完整电商网站"→多域大任务）、域感知Token预估（15000+而非50）、Token量级加分、隐含子任务发现(_discover_implicit_subtasks)、SKILL.md强制规则#5(收到非简单任务→自动评估)。29项测试全通过。 |
 | **v3.2.0** | 2026-07-02 | 子Agent编排器：4维度复杂度评估+反编配门控(简单/顺序/熔断)、任务分解引擎(目标+输出+工具+边界+独立性校验)、6套工具画像、预算熔断(50000上限+3次级联)+失败隔离、生命周期追踪。新增 sb_orchestrator.py(~500行)，CLI新增 orchestrate 命令组(assess/decompose/spec/spawn/complete/stats/reset/profiles)。76项测试全通过。 |
-| **v3.1.0** | 2026-07-02 | 五大升级：反污染规则(P0)低置信度决策+未解决错误+SimHash去重、Obsidian双向同步(P1)JSON→.md+[[wikilink]]导出写入本地知识库v1/超脑记忆、冷启动门控(P1)memory<15+sessions<3→仅感知存储、退场生命周期(P2)硬删除线+自动备份、会话生命周期协议(P2)T1启动+T2收尾+T3健康扫描。61项测试全通过。 |
+| **v3.1.0** | 2026-07-02 | 五大升级：反污染规则(P0)低置信度决策+未解决错误+SimHash去重、Obsidian双向同步(P1)JSON→.md+[[wikilink]]导出写入 Obsidian vault/超脑记忆、冷启动门控(P1)memory<15+sessions<3→仅感知存储、退场生命周期(P2)硬删除线+自动备份、会话生命周期协议(P2)T1启动+T2收尾+T3健康扫描。61项测试全通过。 |
 | **v3.0.1** | 2026-07-02 | 被动触发修复：SKILL.md 新增自然语言触发场景表（8种场景→命令映射）；USER.md 注入超脑使用约定（每会话硬注入）；SOUL.md Continuity 节增加超脑主动使用指令。三层冗余确保每会话感知。 |
 | **v3.0.0** | 2026-06-29 | 八大升级：三进制哈希字词网络（3^64状态）、分类管线（定义/闲聊差异化衰减）、感知增强（学/查自动判断）、推理引擎（关键点提取+逻辑分析+结论推导）、纠缠场（三通道关联挖掘）、上下文记忆（主题聚类+跨会话追踪）、本地长期记忆（对话即入库+零成本检索）、记忆引擎升级（自动存储+错别字纠偏+表达学习）。61项测试全通过。 |
 | v2.1.0 | 2026-06-28 | 记忆双时间机制、动态阈值检索、自检时间有效性指标 |

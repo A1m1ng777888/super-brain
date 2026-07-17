@@ -24,14 +24,10 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from sb_core import read_memories, read_graph, read_meta, update_meta
+from sb_core import read_memories, read_graph, read_meta, update_meta, \
+    WARMUP_MEMORY_THRESHOLD, WARMUP_SESSION_THRESHOLD  # v3.9.5 P2-9: 共享 warmup 常量
 from sb_search import tokenize, tf_idf_cosine_similarity, keyword_match_score
 from sb_graph import find_node, query_graph
-
-
-# v3.1.0: Cold start gating thresholds
-WARMUP_MEMORY_THRESHOLD = 15      # Min active memories needed
-WARMUP_SESSION_THRESHOLD = 3      # Min sessions needed
 
 
 def check_warmup_mode(workspace=None):

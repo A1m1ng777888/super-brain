@@ -63,8 +63,15 @@ DRIVE_PATH_RE = re.compile(r'(?<![A-Za-z/])[A-Za-z]:[\\/][\u4e00-\u9fffa-zA-Z0-9
 # 负向后行断言排除字母前缀，避免误伤文档中对 Unix 路径的正当引用。
 UNIX_HOME_RE = re.compile(r'(?<!\w)/(?:home|Users|root)/[\u4e00-\u9fffa-zA-Z0-9_./-]+')
 
-# 只处理这两个事实源文件
-TARGET_FILES = ("sb_obsidian.py", "superbrain.py")
+# v3.9.5 P2-13: 扩大的目标文件集——包括所有可能含硬编码路径的 Python 文件
+# 排除：脱敏脚本自身、测试文件（含占位测试路径的不可脱敏）、__pycache__
+TARGET_FILES = (
+    "sb_capability.py", "sb_context.py", "sb_core.py", "sb_entanglement.py",
+    "sb_gating.py", "sb_graph.py", "sb_longterm.py", "sb_memory.py",
+    "sb_mermaid.py", "sb_obsidian.py", "sb_orchestrator.py", "sb_perception.py",
+    "sb_pipeline.py", "sb_reasoning.py", "sb_search.py", "sb_selfcheck.py",
+    "sb_skillopt.py", "sb_token_roi.py", "sb_trace.py", "superbrain.py",
+)
 
 
 def strip_text(text):
