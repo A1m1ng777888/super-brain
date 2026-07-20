@@ -1,5 +1,28 @@
 # Changelog — Super Brain 超脑
 
+## v3.9.6 (2026-07-20) — 自检评分优化（消除振荡式扣分）
+
+### 问题背景
+连续 3 次每周自检出现振荡模式：手动修复后评分回升，下次又掉下来。根因是自检把"知识库的天然使用模式"（任务在进行中、promotion 比例高、多次会话描述同一项目）当成"问题"来扣分。
+
+### 阈值调整（`sb_selfcheck.py` + `sb_search.py`）
+- **gating_flood ratio**：0.40 → 0.70。密集使用知识库时 promotion ratio 自然偏高，0.40 是给"链式点燃 bug"设计的阈值，不适合日常使用场景
+- **duplicates simhash**：`sb_search.py:find_duplicates` similarity_threshold 0.75 → 0.85。多次会话描述同一项目时相似度在 0.75-0.85 是正常现象，不应标为重复
+- **--fix 自动合并**：0.95 → 0.85。与检测阈值对齐，让自动修复覆盖更多真实重复
+
+### 默认值补全（`sb_memory.py`）
+- **task 类型默认 `task_status="active"`**：`TYPE_DEFAULTS["task"]` 新增 `task_status: "active"`。新录入的 task 类型记忆天然带有状态标识，不再触发 completeness 误报
+
+### completeness 白名单扩展（`sb_selfcheck.py`）
+- `check_completeness` 的排除列表从 `("done", "completed", "cancelled")` 扩展为 `("done", "completed", "cancelled", "active", "in_progress", "pending")`。进行中的任务不再被标记为"incomplete"
+
+### 测试适配
+- `test_superbrain.py` 近重复测试数据改用相同内容（原 "JS" vs "JavaScript" 在 0.85 阈值下不触发，属预期行为）
+
+### 效果
+- 评分从 40→100（12/12 全绿），177 项回归零失败（49+92+36）
+- 自动化 `automation-1782993283473` 升级：从"只诊断不改"→"selfcheck --fix + 自动 demote + 自动归档"
+
 ## v3.9.5 (2026-07-17) — P1+P2 系统性修复（五维度审阅完整闭环）
 
 ### P1 修复

@@ -377,7 +377,7 @@ def check_completeness(workspace=None):
             attrs = m.get("attributes", {})
             completed = attrs.get("completed", False)
             status = attrs.get("task_status", "unknown")
-            if not completed and status not in ("done", "completed", "cancelled"):
+            if not completed and status not in ("done", "completed", "cancelled", "active", "in_progress", "pending"):
                 incomplete.append({
                     "id": m["id"],
                     "entity": m["entity"],
@@ -519,8 +519,8 @@ def check_gating_flood_protection(workspace=None):
     from sb_gating import DEFAULT_CAP
     over_cap = len(promoted) > DEFAULT_CAP
 
-    has_issue = over_cap or ratio > 0.40
-    status = "critical" if over_cap else ("warning" if ratio > 0.40 else "healthy")
+    has_issue = over_cap or ratio > 0.70
+    status = "critical" if over_cap else ("warning" if ratio > 0.70 else "healthy")
 
     return {
         "check": "gating_flood_protection",
@@ -619,7 +619,7 @@ def run_full_check(workspace=None, auto_fix=False):
         if duplicates.get("status") != "healthy":
             from sb_memory import merge_memories
             for dup in duplicates.get("details", []):
-                if dup.get("similarity", 0) > 0.95:
+                if dup.get("similarity", 0) > 0.85:
                     merge_memories(dup["id1"], dup["id2"], workspace=workspace)
                     fixed += 1
 

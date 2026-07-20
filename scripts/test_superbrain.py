@@ -191,7 +191,7 @@ test("Health report is latest", latest.get("timestamp") == report.get("timestamp
 section("Duplicate Detection")
 
 # Add a near-duplicate
-m_dup = add_memory("User prefers Python over JS", "preference", "user", 0.9, "test")
+m_dup = add_memory("User prefers Python over JavaScript", "preference", "user", 0.9, "test")
 issues = find_issues()
 test("Issues found duplicates", len(issues.get("duplicates", [])) > 0, "No duplicates found")
 

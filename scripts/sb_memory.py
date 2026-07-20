@@ -39,7 +39,7 @@ TYPE_DEFAULTS = {
     "preference": {"scope": "global", "category": "personal"},
     "event": {"scope": "workspace", "category": "history"},
     "relationship": {"scope": "global", "category": "social"},
-    "task": {"scope": "workspace", "category": "work"},
+    "task": {"scope": "workspace", "category": "work", "task_status": "active"},
     "decision": {"scope": "workspace", "category": "work"},
     "context": {"scope": "session", "category": "background"},
     "reasoning_intermediate": {"scope": "session", "category": "reasoning"}

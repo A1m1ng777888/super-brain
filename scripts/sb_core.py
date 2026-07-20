@@ -22,7 +22,7 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 )
 
 # v3.9.4: 单一版本号来源（修复 DEFAULT_CONFIG/三处兜底四处漂移的审阅 P1-4）
-VERSION = "3.9.5"
+VERSION = "3.9.6"
 
 # v3.9.5 P2-9: warmup 常量统一来源（消除 sb_reasoning/sb_entanglement 重复定义）
 WARMUP_MEMORY_THRESHOLD = 15

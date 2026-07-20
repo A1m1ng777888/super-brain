@@ -680,7 +680,7 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
     return results[:limit]
 
 
-def find_duplicates(memories, similarity_threshold=0.75):
+def find_duplicates(memories, similarity_threshold=0.85):
     """
     Find likely duplicate memories using a two-stage approach:
     1. SimHash coarse filter (simhash_threshold=0.65) for fast candidate selection
