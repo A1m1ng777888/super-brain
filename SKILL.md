@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.9.6
-released: 2026-07-20
+version: v3.9.7
+released: 2026-07-24
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.9.6。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。278 项回归零失败。v3.9.6（自检评分优化）：gating_flood ratio 阈值 0.40→0.70、duplicates simhash 0.75→0.85、--fix 自动合并 0.95→0.85、task 默认 task_status=active、completeness 白名单扩展、自动化升级。177 项回归零失败。纯标准库零依赖。"
+description: "Super Brain 超脑认知增强技能 v3.9.7。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。278 项回归零失败。v3.9.6（自检评分优化）：gating_flood ratio 阈值 0.40→0.70、duplicates simhash 0.75→0.85、--fix 自动合并 0.95→0.85、task 默认 task_status=active、completeness 白名单扩展、自动化升级。177 项回归零失败。v3.9.7（自动触发断裂链修复）：write_json 返回值补全消假警告、跨会话硬步骤死锁修复（exit 2→自动重置放行）。270 项回归零失败。纯标准库零依赖。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.9.6
+# Super Brain (超脑) — 认知增强技能 v3.9.7
 
 ## 概述
 
@@ -681,6 +681,7 @@ input_schema:
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.9.7** | **2026-07-24** | **自动触发断裂链修复：** ① 修复 `write_json` 无返回值 → `mark_search_done` 每次打印假"写入失败"警告（v3.9.5 回归）② 修复跨会话硬步骤死锁——过期窗口 / 从未检索场景改为自动重置计时器并放行，而非 `exit 2` 拦截，消除跨会话自动入库静默丢失。270 项回归零失败（15+36+49+71+92+7）。|
 | **v3.9.6** | **2026-07-20** | **自检评分优化（消除振荡式扣分）：** ① 阈值调整：gating_flood ratio 0.40→0.70（密集使用场景不再误报）、duplicates simhash 0.75→0.85（跨会话项目描述不再误标）、--fix 自动合并 0.95→0.85（与检测阈值对齐）② 默认值补全：TYPE_DEFAULTS["task"] 新增 task_status="active"，新 task 天然不触发 completeness 误报 ③ completeness 白名单扩展：排除列表 +active/in_progress/pending ④ VERSION 3.9.5→3.9.6 ⑤ 自动化升级：skip 旧 maintenance/cleanup 脚本路径，改为 selfcheck --fix + 自动 demote + 自动归档 ⑥ 测试适配：177 项回归零失败（49+92+36）。|
 | **v3.9.5** | **2026-07-17** | **P1+P2 系统性修复（五维度审阅完整闭环）：** ① P1-5 硬步骤门控加固：`_hardstep_save` 改 `write_json` 原子写 + 未来时间戳拒绝 + overrides 环形截断(200 条) ② P2-10 策略下沉：`enforce_hard_step_guard`/`mark_search_done` 从 `superbrain.py` 移到 `sb_gating.py`（门控策略归领域层） ③ P1-6 并发写治理：`write_json` tmp 名加 `os.getpid()` ④ P1-7 token_roi XSS：`html.escape` 转义 `content_preview`/`category`/`recommendation` ⑤ P2-9 warmup 常量共享：`WARMUP_MEMORY_THRESHOLD=15/WARMUP_SESSION_THRESHOLD=3` 移至 `sb_core.py`，`sb_reasoning`/`sb_entanglement` 统一 import ⑥ P2-11 读路径写副作用：`sb_memory.search update_access_stats` 默认 `False` ⑦ P1-8 关键路径补测：新增 `test_p1.py`(15 项)——硬步骤 exit 2/损坏 JSON 恢复/persona 双层/RRF 融合/二进制防护 ⑧ P2-12 分层依赖注释 ⑨ P2-13 发布面收尾：SKILL.md「本地知识库v1」→ 通用值、`prepublish TARGET_FILES 20` 项、dashboard CDN 降级。278 项回归零失败（49+71+92+36+7+8+15）。 |
 | **v3.9.4** | **2026-07-17** | **P0 性能与安全修复（五维度审阅驱动）：** ① 搜索热路径 O(n²·terms) 退化修复：`sb_search.py` 预建 IDF 文档频率表（`_tfidf_cosine_precomputed`）+ `fuzzy_match` 长度差预筛（编辑距离下界剪枝，放在 substring 快速路径之后不误杀）。n=500 实测从 21s 降至 0.6s（35 倍），n=174 从 2.8s 降至 0.19s（15 倍）。② 零成本索引自动维护：`sb_longterm.py` 新增 `_ensure_fresh_index()`——缺失/陈旧/计数不符时自动重建；`zero_cost_retrieve` 首次含重建 1.4s，后续 **10ms**（含 keyword_index 11936 tokens 候选过滤）。③ 测试文件强制数据目录隔离：`test_v2.py`/`test_v36.py` 在 `from sb_core import` 前强制 `os.environ["SUPERBRAIN_DATA_DIR"] = mkdtemp`；`sb_orchestrator.py:1727` 内嵌测试硬编码路径→`get_workspace_dir`。④ P1-4 版本号单一来源：`sb_core.py` 新增 `VERSION` 常量，`superbrain.py` 三处兜底统一引用。263 项回归零失败（49+71+92+36+7+8）。 |

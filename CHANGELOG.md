@@ -1,6 +1,30 @@
 # Changelog — Super Brain 超脑
 
-## v3.9.6 (2026-07-20) — 自检评分优化（消除振荡式扣分）
+## v3.9.7 (2026-07-24) — 自动触发断裂链修复
+
+### 修复 1: `write_json` 无返回值导致假警告（P0 回归）
+`sb_core.py:write_json()` 缺少 `return` 语句，返回 `None`。`_hardstep_save()` 将 `None` 返回给 `mark_search_done()`，`not None == True` 条件始终成立，导致**每次 search 都打印假警告**：
+```
+⚠️ [HARD-STEP] mark_search_done 写入失败，后续写入可能被误拦截
+```
+实际写入成功，警告是假的。为 v3.9.5 裸 `json.dump` 改 `write_json` 时引入的回归。
+- **修复**：`write_json` 末尾加 `return True`
+- **影响**：仅 `_hardstep_save()` 一处下游使用返回值，其他 30+ 处 `write_json` 调用者忽略返回值——零风险
+
+### 修复 2: 跨会话硬步骤死锁（P0 设计缺陷）
+`enforce_hard_step_guard` 的 30 分钟窗口假设**仅适用于同会话**。跨会话时 `last_search_ts` 来自历史会话（远超 30 分钟），首个写入命令被 `exit 2` 拦截。Agent 未处理子进程 exit 2 → 自动入库静默丢失 → B/C/D 连锁断裂。
+- **修复**：过期窗口 / 从未检索场景改为**自动重置计时器并放行**（而非 `exit 2`），保留警告提醒
+- **保留**：`--force` 豁免路径不变、未来时间戳拒绝不变、窗口内相关性校验不变
+- **测试**：`test_p1.py` T1b 用例从「预期 exit 2」更新为「预期自动重置放行」
+
+### 回归验证
+- test_p1.py: 15/15 ✅
+- test_v36.py: 36/36 ✅
+- test_superbrain.py: 49/49 ✅
+- test_v2.py: 71/71 ✅
+- test_v3.py: 92/92 ✅
+- test_obsidian.py: 7/7 ✅
+- **总计: 270/270 — 零回归**
 
 ### 问题背景
 连续 3 次每周自检出现振荡模式：手动修复后评分回升，下次又掉下来。根因是自检把"知识库的天然使用模式"（任务在进行中、promotion 比例高、多次会话描述同一项目）当成"问题"来扣分。

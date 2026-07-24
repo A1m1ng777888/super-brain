@@ -58,19 +58,22 @@ def test_hardstep_exit():
     finally:
         sys.stderr = saved_stderr
 
-    # 1b: 手动失效时间戳 → 应 exit 2
+    # 1b: 手动失效时间戳 → 应自动重置并放行（不再 exit 2）
     st = __import__("sb_gating")
     st._hardstep_load()  # ensure file exists
     state = st._hardstep_load()
     state["last_search_ts"] = 100  # epoch start, 50+ years ago
     st._hardstep_save(state)
 
+    import io
+    sys.stderr = io.StringIO()
     try:
         enforce_hard_step_guard(force=False, content="test", command="memory add")
-        check("T1b: 过期窗口应触发 exit", False, "未 exit")
+        check("T1b: 过期窗口自动重置并放行（不再 exit）", True)
     except SystemExit as e:
-        check("T1b: 过期窗口 exit 2", e.code == 2, f"exit code={e.code}")
+        check("T1b: 过期窗口不应 exit", False, f"unexpected exit code={e.code}")
     finally:
+        sys.stderr = saved_stderr
         # 恢复——重置检索状态
         mark_search_done("test query")
 

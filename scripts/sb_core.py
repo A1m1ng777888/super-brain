@@ -22,7 +22,7 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 )
 
 # v3.9.4: 单一版本号来源（修复 DEFAULT_CONFIG/三处兜底四处漂移的审阅 P1-4）
-VERSION = "3.9.6"
+VERSION = "3.9.7"
 
 # v3.9.5 P2-9: warmup 常量统一来源（消除 sb_reasoning/sb_entanglement 重复定义）
 WARMUP_MEMORY_THRESHOLD = 15
@@ -332,6 +332,7 @@ def write_json(path, data):
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, path)  # 原子重命名
+    return True
 
 
 def read_memories(workspace=None):
