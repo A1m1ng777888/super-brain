@@ -66,11 +66,12 @@ UNIX_HOME_RE = re.compile(r'(?<!\w)/(?:home|Users|root)/[\u4e00-\u9fffa-zA-Z0-9_
 # v3.9.5 P2-13: 扩大的目标文件集——包括所有可能含硬编码路径的 Python 文件
 # 排除：脱敏脚本自身、测试文件（含占位测试路径的不可脱敏）、__pycache__
 TARGET_FILES = (
-    "sb_capability.py", "sb_context.py", "sb_core.py", "sb_entanglement.py",
-    "sb_gating.py", "sb_graph.py", "sb_longterm.py", "sb_memory.py",
-    "sb_mermaid.py", "sb_obsidian.py", "sb_orchestrator.py", "sb_perception.py",
-    "sb_pipeline.py", "sb_reasoning.py", "sb_search.py", "sb_selfcheck.py",
-    "sb_skillopt.py", "sb_token_roi.py", "sb_trace.py", "superbrain.py",
+    "sb_capability.py", "sb_context.py", "sb_core.py", "sb_domain.py",
+    "sb_entanglement.py", "sb_gating.py", "sb_graph.py", "sb_longterm.py",
+    "sb_memory.py", "sb_mermaid.py", "sb_obsidian.py", "sb_orchestrator.py",
+    "sb_perception.py", "sb_pipeline.py", "sb_reasoning.py", "sb_search.py",
+    "sb_selfcheck.py", "sb_skillopt.py", "sb_token_roi.py", "sb_trace.py",
+    "superbrain.py",
 )
 
 

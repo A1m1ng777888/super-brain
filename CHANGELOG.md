@@ -1,5 +1,49 @@
 # Changelog — Super Brain 超脑
 
+## v3.9.8 (2026-08-06) — mattpocock 纪律库吸收
+
+来源：[mattpocock/skills](https://github.com/mattpocock/skills) 调研（2026-08-06，用户要求评估"哪些可以抄一抄"）。选择**吸进超脑而非全套安装**：纪律长在既有执行路径里（编排器/访谈协议/审阅），而非旁边多一个孤立 skill。
+
+### 升级 1: decompose 曳光弹切片规格（`sb_orchestrator.py`）
+借鉴 to-tickets 的垂直切片硬约束——"Each slice is sized to fit in a single fresh context window"：
+- `_build_subtask` 新增 `blocking_edges`（阻塞边声明，默认 `[]` = 可立即启动）
+- `_build_subtask` 新增 `context_window_fit`（`_estimate_context_fit()` 估算：中文 ~1.5 chars/token、英文 ~0.25 chars/token，多独立要求判定超载 → 建议再拆）
+- `decompose_task` 返回新增 `slices` 汇总（index/objective/blocked_by/context_window_fit）+ `wide_refactor`
+- 新增 `detect_wide_refactor()`：改名/重命名、schema 重命名、类型替换、目录重组等**单点机械变更波及全库**的模式 → 返回 expand-contract 三步序列建议（不做曳光弹，因为"任何垂直切片都无法保持绿色"）
+
+### 升级 2: frontier 拷问法升级反向采访（`SKILL.md` 未知发现协议）
+借鉴 grilling 的设计树机制：
+- 决策画成**设计树**，按 **rounds** 工作，**frontier** = 前置条件已 settled 现在就能问的决策
+- 每轮把整片 frontier **一次问完**，每个问题编号 + **附推荐答案**（用户只需确认/推翻，成本极低）
+- 关键纪律：**事实是 Agent 的活，决策是用户的活**——可从环境查的事实派子 agent 查，只有决策提交用户
+- 终止条件：frontier 清空 = 设计树每个分支都访问过，**没有任何东西被静默假设**，用户确认共享理解前不动手
+
+### 升级 3: domain 项目术语表（新模块 `sb_domain.py` + CLI）
+借鉴 CONTEXT.md 共享语言模式——"It is a glossary and nothing else"：
+- 术语只存**词汇定义**，严禁 spec/草稿/实现细节混入
+- 术语一经确定**当刻即写**，不批量攒
+- 歧义当场标记 + 消解记录（避免"backlog 既是工具又是工作量"）
+- 可导出 CONTEXT.md（人读/agent 共享），也可按 workspace 隔离存储
+- CLI：`domain add/get/list/remove/ambiguity/ambiguities/export/stats`
+
+### 升级 4: 双轴 code-review 固化（新文档 `references/review-guide.md`）
+借鉴 code-review 技能，把 2026-07-14~15 GLM-5.2 外部审阅实验固化为可复用资产：
+- **双轴分离不合并**：Standards（符合仓库标准 + Fowler 坏味道）× Spec（忠实实现 issue/spec），并行子 agent 互不污染上下文
+- **Fowler 12 坏味道基线全文**（Mysterious Name / Duplicated Code / Feature Envy / Data Clumps / Primitive Obsession / Repeated Switches / Shotgun Surgery / Divergent Change / Speculative Generality / Message Chains / Middle Man / Refused Bequest）——审阅 prompt 必须全文注入，子 agent 无其他访问途径
+- 两条绑定规则：repo overrides 仓库标准覆盖基线；永远是判断不是硬违规
+- 沉淀 GLM 审阅实验 6 种系统性缺陷模式（静默数据丢失/量纲错误/异常静默吞掉/写副作用进只读函数/文档与行为不一致/死代码）
+
+### 回归验证
+- test_v38.py: 35/35 ✅（新增）
+- test_p1.py: 15/15 ✅
+- test_v36.py: 36/36 ✅
+- test_superbrain.py: 49/49 ✅
+- test_v2.py: 71/71 ✅
+- test_v3.py: 92/92 ✅
+- test_obsidian.py: 7/7 ✅
+- test_prepublish_strip.py: 8/8 ✅
+- **总计: 313/313 — 零回归**
+
 ## v3.9.7 (2026-07-24) — 自动触发断裂链修复
 
 ### 修复 1: `write_json` 无返回值导致假警告（P0 回归）

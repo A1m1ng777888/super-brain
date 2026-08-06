@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.9.7
-released: 2026-07-24
+version: v3.9.8
+released: 2026-08-06
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.9.7。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。278 项回归零失败。v3.9.6（自检评分优化）：gating_flood ratio 阈值 0.40→0.70、duplicates simhash 0.75→0.85、--fix 自动合并 0.95→0.85、task 默认 task_status=active、completeness 白名单扩展、自动化升级。177 项回归零失败。v3.9.7（自动触发断裂链修复）：write_json 返回值补全消假警告、跨会话硬步骤死锁修复（exit 2→自动重置放行）。270 项回归零失败。纯标准库零依赖。"
+description: "Super Brain 超脑认知增强技能 v3.9.8。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。278 项回归零失败。v3.9.6（自检评分优化）：gating_flood ratio 阈值 0.40→0.70、duplicates simhash 0.75→0.85、--fix 自动合并 0.95→0.85、task 默认 task_status=active、completeness 白名单扩展、自动化升级。177 项回归零失败。v3.9.7（自动触发断裂链修复）：write_json 返回值补全消假警告、跨会话硬步骤死锁修复（exit 2→自动重置放行）。270 项回归零失败。v3.9.8（mattpocock 纪律库吸收）：decompose 曳光弹切片规格（blocking_edges/context_window_fit/宽重构 expand-contract）、frontier 拷问法升级反向采访、新增 domain 项目术语表（CONTEXT.md 共享语言）、双轴 code-review + Fowler 12 味道基线固化（references/review-guide.md）。313 项回归零失败。纯标准库零依赖。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.9.7
+# Super Brain (超脑) — 认知增强技能 v3.9.8
 
 ## 概述
 
@@ -257,7 +257,11 @@ Persona workspace 是 AI 助手的**常驻身份记忆层**——跨项目始终
 
 1. **Pre-implementation 动手前**
    - **Blindspot Pass 盲点审查**：接到非平凡新任务时，先 `SB memory search` + `SB entangle mine` 扫描 brief 与已知上下文的落差，主动列出「我可能忽略的未知未知」，再问用户「接下来怎么更好提问」。
-   - **Reverse Interview 反向采访**：动手前**一次只问一个**架构级关键问题（一旦答案变了就改变底层方案的问题），把 Known / Unknown Unknowns 逐步搬进 Known Knowns；不一次抛出 5 个 trivial 问题。
+   - **Reverse Interview 反向采访（v3.9.8 升级为 frontier 拷问法）**：动手前就计划/设计展开**拷问式访谈**（借鉴 mattpocock/skills `grilling` 技能），把决策画成一棵**设计树**——每个决策分支挂出依赖它的子决策。按 **rounds（轮）** 工作：**frontier = 所有前置条件已settled、现在就能问的决策**。每轮把整片 frontier 一次问完，每个问题编号 + **附上我的推荐答案**（用户只需确认/推翻，成本极低）；等用户答完再算下一轮 frontier。关键纪律：
+     - **事实是 Agent 的活，决策是用户的活**——frontier 问题里凡是能从环境查的事实（文件系统/工具/记忆库），派子 agent 查，绝不问用户能自己查到的东西；只有决策才提交给用户。
+     - **一次只问一个**架构级关键问题（一旦答案变了就改变底层方案的问题）仍适用于"独立决策"，但 frontier 内**并行编号多问**（它们互不依赖）；依赖未决问题的问题归入更晚的 round，不在本轮问。
+     - **终止条件**：设计树 frontier 清空——每个分支都访问过、没有任何东西被静默假设。在用户确认达成共享理解前，不动手执行。
+     - 问题格式：`❓ Q1 - <标题>: <正文含多个选项>` + `➡️ 推荐答案`。
    - **References 参照锚点**：引用用户历史同类项目 / 记忆作为约束 anchor，把「说不清的品味」具象化。
 
 2. **During implementation 执行中**
@@ -681,6 +685,7 @@ input_schema:
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.9.8** | **2026-08-06** | **mattpocock 纪律库吸收（四项升级）：** ① **decompose 曳光弹切片规格**（借鉴 to-tickets）——`_build_subtask` 新增 `blocking_edges`（阻塞边声明，默认空=可立即启动）+ `context_window_fit`（`_estimate_context_fit` 估算切片是否单个全新上下文窗口装下，超预算/含多独立要求→建议再拆）；`decompose_task` 新增 `slices` 汇总 + `wide_refactor` 检测（`detect_wide_refactor`——改名/类型替换/目录重组等波及全库的机械变更→expand-contract 三步序列，不做曳光弹）。② **frontier 拷问法升级反向采访**（借鉴 grilling）——设计树按 rounds 工作、每轮问整片 frontier、每问编号+附推荐答案、事实是 Agent 的活决策是用户的活、frontier 清空才动手。③ **新增 domain 项目术语表**（借鉴 CONTEXT.md 共享语言）——新模块 `sb_domain.py`，术语只存词汇定义零实现细节、当刻即写、歧义标记消解、可导出 CONTEXT.md；CLI：`domain add/get/list/remove/ambiguity/ambiguities/export/stats`。④ **双轴 code-review 固化**（借鉴 code-review）——新增 `references/review-guide.md`：Standards×Spec 并行子 agent 不合并、Fowler 12 坏味道基线全文（供注入 prompt）、repo overrides 规则、GLM-5.2 审阅实验 6 种系统性缺陷模式沉淀。新增 `test_v38.py`(35 项)。313 项回归零失败（49+71+92+36+7+8+15+35）。 |
 | **v3.9.7** | **2026-07-24** | **自动触发断裂链修复：** ① 修复 `write_json` 无返回值 → `mark_search_done` 每次打印假"写入失败"警告（v3.9.5 回归）② 修复跨会话硬步骤死锁——过期窗口 / 从未检索场景改为自动重置计时器并放行，而非 `exit 2` 拦截，消除跨会话自动入库静默丢失。270 项回归零失败（15+36+49+71+92+7）。|
 | **v3.9.6** | **2026-07-20** | **自检评分优化（消除振荡式扣分）：** ① 阈值调整：gating_flood ratio 0.40→0.70（密集使用场景不再误报）、duplicates simhash 0.75→0.85（跨会话项目描述不再误标）、--fix 自动合并 0.95→0.85（与检测阈值对齐）② 默认值补全：TYPE_DEFAULTS["task"] 新增 task_status="active"，新 task 天然不触发 completeness 误报 ③ completeness 白名单扩展：排除列表 +active/in_progress/pending ④ VERSION 3.9.5→3.9.6 ⑤ 自动化升级：skip 旧 maintenance/cleanup 脚本路径，改为 selfcheck --fix + 自动 demote + 自动归档 ⑥ 测试适配：177 项回归零失败（49+92+36）。|
 | **v3.9.5** | **2026-07-17** | **P1+P2 系统性修复（五维度审阅完整闭环）：** ① P1-5 硬步骤门控加固：`_hardstep_save` 改 `write_json` 原子写 + 未来时间戳拒绝 + overrides 环形截断(200 条) ② P2-10 策略下沉：`enforce_hard_step_guard`/`mark_search_done` 从 `superbrain.py` 移到 `sb_gating.py`（门控策略归领域层） ③ P1-6 并发写治理：`write_json` tmp 名加 `os.getpid()` ④ P1-7 token_roi XSS：`html.escape` 转义 `content_preview`/`category`/`recommendation` ⑤ P2-9 warmup 常量共享：`WARMUP_MEMORY_THRESHOLD=15/WARMUP_SESSION_THRESHOLD=3` 移至 `sb_core.py`，`sb_reasoning`/`sb_entanglement` 统一 import ⑥ P2-11 读路径写副作用：`sb_memory.search update_access_stats` 默认 `False` ⑦ P1-8 关键路径补测：新增 `test_p1.py`(15 项)——硬步骤 exit 2/损坏 JSON 恢复/persona 双层/RRF 融合/二进制防护 ⑧ P2-12 分层依赖注释 ⑨ P2-13 发布面收尾：SKILL.md「本地知识库v1」→ 通用值、`prepublish TARGET_FILES 20` 项、dashboard CDN 降级。278 项回归零失败（49+71+92+36+7+8+15）。 |
@@ -718,3 +723,29 @@ input_schema:
 - `references/architecture.md` — 完整架构、数据流、模块交互
 - `references/data-schema.md` — 记忆、图谱、配置的数据模式
 - `references/token-optimization.md` — Token 优化策略与量化指标
+- `references/review-guide.md` — 双轴代码审阅规范（v3.9.8）：Standards×Spec 并行子 agent、Fowler 12 坏味道基线全文（供注入审阅 prompt）、repo 覆盖规则、审阅流程。GLM-5.2 外部审阅实验的纪律固化。
+
+## 项目术语表（v3.9.8，借鉴 mattpocock CONTEXT.md 共享语言）
+
+**问题**：项目讨论中"说不清的品味"和行话漂移是 Unknown Knowns 的高发区——你默认懂了、AI 默认猜了，两端对不上。术语表提供**人机共享的词汇共识**。
+
+**核心纪律**（源自 mattpocock/skills 的 CONTEXT.md）：
+- 术语表**只存词汇定义**——"It is a glossary and nothing else"。严禁 spec、草稿、实现细节混入。
+- 术语一经确定**当刻即写**（capture as they happen），不批量攒。
+- 歧义当场标记并记录消解方案（`SB domain ambiguity`），避免"backlog 既是工具又是工作量"这类二义残留。
+- 项目语境切换时先 `SB domain list` 召回术语，agent 用词与项目一致 → 思考 token 下降、沟通误差减半。
+
+**命令**（v3.9.8 新增）：
+
+| 命令 | 用途 |
+|------|------|
+| `domain add <term> <definition> [--status proposed\|accepted\|deprecated] [--avoid 同义词,...]` | 新增/更新术语（当刻即写） |
+| `domain get <term>` | 查询单个术语 |
+| `domain list [--status ...]` | 列出术语 |
+| `domain remove <term>` | 删除术语 |
+| `domain ambiguity <term> --conflict "..." --resolution "..."` | 标记术语歧义与消解 |
+| `domain ambiguities` | 列出歧义记录 |
+| `domain export [--path ...]` | 导出 CONTEXT.md（人读/agent 共享格式） |
+| `domain stats` | 术语表统计 |
+
+**与超脑记忆的关系**：术语表是**显式约定层**（agent 行为约束），记忆是**隐式检索层**（语义召回）。同一术语可同时存在于两者，不冲突——术语表负责"该怎么说"，记忆负责"之前聊过什么"。

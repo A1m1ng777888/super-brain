@@ -68,6 +68,10 @@ import time
 # Add scripts directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# v3.9.8 修复：cmd_version/cmd_init/cmd_health 三处引用 sb_core.VERSION
+# 但此前只 `from sb_core import ...` 未 `import sb_core` 模块名 → NameError
+import sb_core
+
 from sb_core import (
     load_config, save_config, ensure_workspace, list_workspaces,
     switch_workspace, print_json, print_table, get_timestamp,
@@ -155,7 +159,7 @@ def cmd_init(args):
     print("SuperBrain initialized successfully.")
     print(f"  Data directory: {config.get('data_dir', DEFAULT_DATA_DIR)}")
     print(f"  Current workspace: {config.get('current_workspace', 'default')}")
-    print(f"  Version: {config.get('version', sb_core.VERSION)}")
+    print(f"  Version: {sb_core.VERSION}")
     print("\nWorkspace 'default' is ready. Use 'workspace create' to add more.")
 
 
@@ -624,7 +628,7 @@ def cmd_stats(args):
 
     print("=== SuperBrain Statistics ===")
     print(f"Workspace: {config.get('current_workspace', 'default')}")
-    print(f"Version: {config.get('version', sb_core.VERSION)}")
+    print(f"Version: {sb_core.VERSION}")
     print()
     print(f"Memory:")
     print(f"  Total: {mem_stats['total']} | Active: {mem_stats['active']} | Archived: {mem_stats['archived']}")
@@ -659,8 +663,8 @@ def cmd_token_roi(args):
 def cmd_version(args):
     """Show version information."""
     config = load_config()
-    print(f"SuperBrain version {config.get('version', sb_core.VERSION)}")
-    print(f"Release date: 2026-07-02")
+    print(f"SuperBrain version {sb_core.VERSION}")
+    print(f"Release date: 2026-08-06")
     print(f"Features: memory (v3.1 anti-pollution), search (v3.0 ternary hash+fuzzy), "
           f"perception (v3.0), pipeline (v3.1 cleanup), reasoning (v3.1 warmup), "
           f"entanglement (v3.1 warmup), context (v3.0), longterm (v3.0), "
@@ -1115,6 +1119,13 @@ def cmd_orch_assess(args):
     print_json(result)
 
 
+# v3.9.8: Domain glossary handler
+def cmd_domain(args):
+    """Project domain glossary (术语表/共享语言)."""
+    from sb_domain import cmd_domain as run_domain
+    run_domain(args)
+
+
 def cmd_orch_decompose(args):
     """Decompose a task into independent sub-tasks."""
     result = decompose_task(args.task, workspace=args.workspace)
@@ -1388,6 +1399,53 @@ def build_parser():
     sp.add_argument("--path", help="Set persona workspace path (absolute path)")
     sp.add_argument("--show", action="store_true", help="Show current persona configuration")
     sp.set_defaults(func=cmd_workspace_persona)
+
+    # v3.9.8: domain — 项目术语表（CONTEXT.md 共享语言，借鉴 mattpocock/skills）
+    sp_dom = subparsers.add_parser("domain", help="v3.9.8: Project domain glossary (术语表/共享语言)")
+    dom_sub = sp_dom.add_subparsers(dest="domain_command")
+
+    sp = dom_sub.add_parser("add", help="Add or update a term")
+    sp.add_argument("term", help="Term name")
+    sp.add_argument("definition", help="Domain meaning (no implementation details)")
+    sp.add_argument("--status", choices=["proposed", "accepted", "deprecated"], default="accepted")
+    sp.add_argument("--avoid", help="Comma-separated synonyms to avoid")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_domain)
+
+    sp = dom_sub.add_parser("get", help="Get a single term")
+    sp.add_argument("term", help="Term name")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_domain)
+
+    sp = dom_sub.add_parser("list", help="List terms (optionally by status)")
+    sp.add_argument("--status", choices=["proposed", "accepted", "deprecated"], default=None)
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_domain)
+
+    sp = dom_sub.add_parser("remove", help="Remove a term")
+    sp.add_argument("term", help="Term name")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_domain)
+
+    sp = dom_sub.add_parser("ambiguity", help="Flag a term ambiguity and its resolution")
+    sp.add_argument("term", help="Term name")
+    sp.add_argument("--conflict", required=True, help="Description of the conflicting usage")
+    sp.add_argument("--resolution", required=True, help="Final ruling (which meaning survives)")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_domain)
+
+    sp = dom_sub.add_parser("ambiguities", help="List flagged ambiguities")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_domain)
+
+    sp = dom_sub.add_parser("export", help="Export CONTEXT.md to file")
+    sp.add_argument("--path", help="Output path (default: <workspace>/CONTEXT.md)")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_domain)
+
+    sp = dom_sub.add_parser("stats", help="Glossary statistics")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_domain)
 
     # stats
     sp = subparsers.add_parser("stats", help="Show overall statistics")

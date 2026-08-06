@@ -596,13 +596,59 @@ def decompose_task(task_description, workspace=None):
     # ── Independence validation ──
     independence_issues = validate_isolation(sub_tasks)
 
+    # v3.9.8 曳光弹切片汇总（借鉴 mattpocock to-tickets）
+    slices_summary = []
+    for t in sub_tasks:
+        slices_summary.append({
+            "index": t["index"],
+            "objective": t["objective"],
+            "blocked_by": t.get("blocking_edges", []),
+            "context_window_fit": t.get("context_window_fit", {}),
+        })
+    wide_refactor = detect_wide_refactor(task_description)
+
     return {
         "sub_tasks": sub_tasks,
         "count": len(sub_tasks),
         "independence_score": 1.0 - (len(independence_issues) * 0.15),
         "warnings": independence_issues,
-        "profiles_used": list(set(p for t in sub_tasks for p in t.get("profiles", [])))
+        "profiles_used": list(set(p for t in sub_tasks for p in t.get("profiles", []))),
+        # v3.9.8: 曳光弹切片规格 + 宽重构 expand-contract 建议
+        "slices": slices_summary,
+        "wide_refactor": wide_refactor,
     }
+
+
+# ─── 宽重构 expand-contract 检测（v3.9.8，借鉴 mattpocock to-tickets）───
+
+WIDE_REFACTOR_PATTERNS = [
+    (r'改名|重命名|rename', "改名/重命名"),
+    (r'列名|column|字段重命名', "schema 重命名"),
+    (r'类型替换|类型迁移|ret(?:y|yp)e', "共享类型替换"),
+    (r'目录重构|文件重组|move .*到|迁移到', "目录/文件重组"),
+]
+
+def detect_wide_refactor(task_description):
+    """检测宽重构（wide refactor）：单个机械变更波及全代码库。
+
+    宽重构不适用曳光弹垂直切片 —— 一个编辑同时破坏成千调用点，
+    任何垂直切片都无法保持绿色。应改用 expand–contract 序列：
+      1. expand: 新旧形式并存，什么都不破坏
+      2. migrate: 按 blast radius 分批迁移（每批一个 ticket）
+      3. contract: 删旧形式（被所有 migrate 批阻塞）
+    返回 None（非宽重构）或建议 dict。
+    """
+    text = task_description or ""
+    for pattern, label in WIDE_REFACTOR_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return {
+                "detected": True,
+                "kind": label,
+                "strategy": "expand-contract",
+                "why": "单点机械变更波及全代码库，垂直切片无法保持绿色",
+                "sequence": ["expand: 新旧形式并存", "migrate: 按 blast radius 分批", "contract: 删旧形式"],
+            }
+    return {"detected": False, "strategy": "tracer-bullet", "why": "无宽重构信号，按曳光弹垂直切片执行"}
 
 
 def _discover_implicit_subtasks(description, primary_profile):
@@ -669,8 +715,13 @@ def _discover_implicit_subtasks(description, primary_profile):
     return []  # undiscoverable — fall back to single general sub-task
 
 
-def _build_subtask(index, description, profiles, scope_note=None):
-    """Build a sub-task spec with 4 required fields."""
+def _build_subtask(index, description, profiles, scope_note=None, blocking_edges=None):
+    """Build a sub-task spec with 4 required fields.
+
+    v3.9.8 曳光弹切片规格（借鉴 mattpocock/skills to-tickets）：
+      - blocking_edges: 本切片依赖的切片 index 列表（默认空 = 可立即启动）
+      - context_window_fit: 估算本切片是否单个全新上下文窗口装得下
+    """
     profile = profiles[0] if profiles else "general"
     profile_def = TOOL_PROFILES.get(profile, TOOL_PROFILES["general"])
 
@@ -710,8 +761,31 @@ def _build_subtask(index, description, profiles, scope_note=None):
         "sub_agent_type": profile_def.get("subagent_type", "general-purpose"),
         "prompt": prompt,
         "budget": DEFAULT_SUB_BUDGET,
-        "max_retries": MAX_RETRIES_PER_SUB
+        "max_retries": MAX_RETRIES_PER_SUB,
+        # v3.9.8 曳光弹切片规格
+        "blocking_edges": blocking_edges or [],
+        "context_window_fit": _estimate_context_fit(description)
     }
+
+
+def _estimate_context_fit(description, budget=150000):
+    """Estimate whether a slice fits in a single fresh context window.
+
+    v3.9.8：借鉴 mattpocock to-tickets 的硬约束 ——
+    "Each slice is sized to fit in a single fresh context window."
+    启发式：中文按字符数、英文按 token 粗估；描述超长/含大量子要点 → 判定不装下。
+    返回 True/False + 理由文本。
+    """
+    text = description or ""
+    # 粗估 token：中文 ~1.5 chars/token，英文 ~4 chars/token
+    cjk = len(re.findall(r'[\u4e00-\u9fff]', text))
+    other = len(text) - cjk
+    est_tokens = int(cjk * 1.5 + other * 0.25)
+    # 多个独立要求（数字列表/顿号分隔）意味着隐含多切片
+    multi_req = len(re.findall(r'(?:\n\s*[\d一二三四五六七八九十]+[.、．])|(?:[，,、])', text))
+    fits = est_tokens < budget and multi_req <= 3
+    reason = f"估算 {est_tokens} tokens" + ("" if fits else f"，超预算/含 {multi_req} 个独立要求，建议再拆")
+    return {"fits": fits, "est_tokens": est_tokens, "reason": reason}
 
 
 def _build_sub_agent_prompt(index, objective, description, profile, scope_note=None):
