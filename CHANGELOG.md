@@ -1,5 +1,44 @@
 # Changelog — Super Brain 超脑
 
+## v3.10.0 (2026-08-12) — 评分体系重构（待办 D + Penguin 评测范式落地）
+
+来源：PenguinHarness（企鹅驾驭师）深度研究（2026-08-12，源码级拆解）。借鉴其评测协议三行映射：① 硬/软指标分域 ② 有效性协议（评测失效不得分）③ 候选→验证→接受/回滚。对应工作记忆待办 D（v3.10.0 评分体系重构——软指标从扣分项改为报告项）。
+
+### 升级 1: 硬/软指标分域（`sb_selfcheck.py` → `_hard_score_from_checks`）
+
+- `get_health_score()` 重构：软指标（completeness / gating_flood / duplicates / consistency / timeliness / temporal_validity / orphans）**从扣分项改为报告项**，不再减总分
+- 总分只基于「**物理完整性 + 时效性 + 真损坏**」：file_integrity / index_integrity（×15 高惩罚）、backup_freshness（>30 天 -5 / >90 天 -15）、gating_salience_bounds / gating_demote_integrity（门控数据一致性破坏）
+- 抽出 `_hard_score_from_checks()` 单一真相源，供 `get_health_score` 与修复后验证共用，杜绝两处逻辑漂移
+
+### 升级 2: 有效性协议（`run_full_check` 顶层状态位）
+
+- report 顶层新增 `score_status`（`valid` / `invalid` / `degraded`）+ `invalid_reason`
+- **物理完整性/索引损坏 → `score_status=invalid`**——评测失效不是低分，`get_health_score` 返回 0，对应 Penguin 的 `failure_code`（benchmark_invalid / evaluation_failed）语义
+- 软指标或门控异常 → `degraded`（分数可算，但标记降级）
+- 消灭「拿脏数据算分」的静默错误：分数与评测有效性正交
+
+### 升级 3: 修复后验证（`--fix` 接受标准）
+
+- `run_full_check(auto_fix=True)` 修复完成后自动重检：`fix_validation` 记录 `pre_score / post_score / accepted / backup_path`
+- 硬分未提升 → 打印回滚提示（备份由 `backup_info` 指向）
+- 对应 Penguin agent-optimization「候选→验证→接受/回滚」纪律：修完必须证明更好
+
+### 升级 4: CLI 暴露
+
+- `selfcheck` / `health` 命令显示 `Score Status`（+ `Invalid Reason` / `Fix Validation`）
+
+### 回归验证
+- test_v310.py: 16/16 ✅（新增）
+- test_v38.py: 35/35 ✅
+- test_p1.py: 15/15 ✅
+- test_v36.py: 36/36 ✅
+- test_superbrain.py: 49/49 ✅
+- test_v2.py: 71/71 ✅
+- test_v3.py: 92/92 ✅
+- test_obsidian.py: 7/7 ✅
+- test_prepublish_strip.py: 8/8 ✅
+- **329/329 回归零失败**
+
 ## v3.9.8 (2026-08-06) — mattpocock 纪律库吸收
 
 来源：[mattpocock/skills](https://github.com/mattpocock/skills) 调研（2026-08-06，用户要求评估"哪些可以抄一抄"）。选择**吸进超脑而非全套安装**：纪律长在既有执行路径里（编排器/访谈协议/审阅），而非旁边多一个孤立 skill。

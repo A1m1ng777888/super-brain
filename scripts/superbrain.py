@@ -151,6 +151,12 @@ from sb_gating import (
     HARDSTEP_WINDOW_SECONDS
 )
 
+# v1.0.0: 遗忘治理 CLI（实验 1 结论落地：软切降权 + dormant demote）
+from sb_forgetting import (
+    scan_forgetting, apply_forgetting, status_forgetting
+)
+
+
 
 def cmd_init(args):
     """Initialize SuperBrain data directory and default workspace."""
@@ -363,6 +369,67 @@ def cmd_gating_explain(args):
     print_json(result)
 
 
+def cmd_forgetting_status(args):
+    """v1.0.0: 遗忘治理状态总览（项目档位 + 豁免/候选统计）。"""
+    from sb_core import read_memories
+    memories = read_memories(args.workspace)
+    if not memories:
+        print_json({"total": 0, "exempt": 0, "tier_counts": {}, "projects": {}})
+        return
+    result = status_forgetting(memories)
+    # 精简输出：只列每个档位 + 项目明细表
+    print_json({
+        "total": result["total"],
+        "exempt": result["exempt"],
+        "tier_counts": result["tier_counts"],
+        "projects": {
+            k: {"count": v["count"], "activity": v["activity"], "tier": v["tier"], "weight": v["weight"]}
+            for k, v in sorted(result["projects"].items(), key=lambda x: -x[1]["count"])
+        },
+    })
+
+
+def cmd_forgetting_scan(args):
+    """v1.0.0: dry-run 扫描——预览将降权/归档的记忆（不写库）。"""
+    from sb_core import read_memories
+    memories = read_memories(args.workspace)
+    if not memories:
+        print_json({"stats": {}, "dormant_candidates": [], "warm_high_risk": []})
+        return
+    result = scan_forgetting(memories)
+    print_json({
+        "dormant_projects": {
+            k: {"count": v["count"], "activity": v["activity"]}
+            for k, v in result["stats"].items() if v["tier"] == "dormant"
+        },
+        "dormant_candidate_count": len(result["dormant_candidates"]),
+        "dormant_candidates": result["dormant_candidates"][: args.limit],
+        "warm_high_risk_count": len(result["warm_high_risk"]),
+        "warm_high_risk": result["warm_high_risk"][: args.limit],
+    })
+
+
+def cmd_forgetting_apply(args):
+    """v1.0.0: 执行遗忘治理——dormant 项目记忆批量 demote（幂等，软切）。"""
+    from sb_core import read_memories, write_memories
+    memories = read_memories(args.workspace)
+    if not memories:
+        print_json({"changed": 0, "stats": {}, "message": "no memories"})
+        return
+    result = apply_forgetting(memories)
+    changed = result["changed"]
+    if changed > 0:
+        write_memories(result["memories"], args.workspace)
+    print_json({
+        "changed": changed,
+        "dormant_projects": {
+            k: {"count": v["count"], "activity": v["activity"]}
+            for k, v in result["stats"].items() if v["tier"] == "dormant"
+        },
+        "note": "软切：demote 降权但保留在检索中，可随时 gating promote 恢复",
+    })
+
+
 def cmd_capability_list(args):
     """v3.7: List all capability profiles."""
     from sb_capability import list_capabilities
@@ -477,9 +544,16 @@ def cmd_selfcheck(args):
     result = run_full_check(auto_fix=args.fix)
     print(f"\n=== SuperBrain Health Check ===")
     print(f"Overall Status: {result['overall_status'].upper()}")
+    print(f"Score Status: {result.get('score_status', 'valid').upper()}")  # v3.10.0
+    if result.get("invalid_reason"):
+        print(f"Invalid Reason: {result['invalid_reason']}")  # v3.10.0
     print(f"Total Issues: {result['total_issues']}")
     if args.fix:
         print(f"Auto-Fixed: {result['auto_fixed']}")
+        fv = result.get("fix_validation")
+        if isinstance(fv, dict) and "pre_score" in fv:
+            mark = "接受" if fv.get("accepted") else "未提升（建议回滚）"
+            print(f"Fix Validation: {fv['pre_score']} -> {fv['post_score']} ({mark})")
     print(f"Timestamp: {result['timestamp']}")
     print()
     for check_name, check in result["checks"].items():
@@ -503,6 +577,10 @@ def cmd_health(args):
     score = get_health_score()
     report = get_health_report()
     print(f"Health Score: {score}/100")
+    if report.get("score_status") == "invalid":
+        print(f"Score Status: INVALID ({report.get('invalid_reason', 'unknown')})  # v3.10.0")
+    else:
+        print(f"Score Status: {report.get('score_status', 'valid').upper()}")  # v3.10.0
     print(f"Last Check: {report.get('timestamp', 'N/A')}")
     print(f"Status: {report.get('overall_status', 'unknown')}")
     print(f"Total Issues: {report.get('total_issues', 0)}")
@@ -1694,6 +1772,25 @@ def build_parser():
     sp.add_argument("--mem-id", required=True, dest="mem_id", help="Memory ID")
     sp.add_argument("--workspace", help="Workspace name")
     sp.set_defaults(func=cmd_gating_explain)
+
+    # forgetting — 遗忘治理 v1.0.0（规模×活跃度二维，软切）
+    sp_forget = subparsers.add_parser(
+        "forgetting", help="遗忘治理 v1.0.0: 项目档位(active/warm/dormant) + 软切降权"
+    )
+    forget_sub = sp_forget.add_subparsers(dest="forgetting_command")
+
+    sp = forget_sub.add_parser("status", help="项目档位 + 豁免/候选统计")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_forgetting_status)
+
+    sp = forget_sub.add_parser("scan", help="dry-run 扫描：预览将降权的记忆（不写库）")
+    sp.add_argument("--limit", type=int, default=20, help="Max candidates to show")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_forgetting_scan)
+
+    sp = forget_sub.add_parser("apply", help="执行治理：dormant 项目记忆批量 demote（幂等）")
+    sp.add_argument("--workspace", help="Workspace name")
+    sp.set_defaults(func=cmd_forgetting_apply)
 
     # capability — v3.7: Capability-aware router (Karpathy 锯齿状智能)
     sp_cap = subparsers.add_parser("capability", help="Capability-aware router (v3.7)")

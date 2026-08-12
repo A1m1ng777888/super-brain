@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-SuperBrain Self-Check System v3.4.0
-====================================
+SuperBrain Self-Check System v3.10.0
+=====================================
+v3.10.0 升级：评分体系重构（待办 D + Penguin 评测范式）——
+  ① 硬/软指标分域：软指标从扣分项改为报告项，总分只基于物理完整性+时效性+真损坏
+  ② 有效性协议：物理损坏时 score_status=invalid（不是低分，是无效）
+  ③ 修复后验证：--fix 后硬分未提升则提示回滚（fix_validation）
 v3.4.0 升级：物理层自检（文件完整性+索引可重建性+备份时效）+ 修复前自动备份
 v2.1.0-base: consistency, timeliness, temporal_validity, completeness, orphans, duplicates.
 Generates health reports and can auto-fix safe issues.
@@ -555,7 +559,11 @@ def run_full_check(workspace=None, auto_fix=False):
         "overall_status": "healthy",
         "total_issues": 0,
         "auto_fixed": 0,
-        "backup_info": None
+        "backup_info": None,
+        # v3.10.0: 有效性协议（Penguin 评测范式）——
+        # 物理完整性/索引损坏 = 评测无效（不是低分），顶层状态位与分数正交。
+        "score_status": "valid",
+        "invalid_reason": None
     }
 
     # Run all checks (physical first, then logical)
@@ -586,6 +594,21 @@ def run_full_check(workspace=None, auto_fix=False):
                     "critical" if check["status"] == "critical" else "needs_attention"
                 )
             results["total_issues"] += check["issues_found"]
+
+    # v3.10.0: 有效性协议 —— 物理完整性/索引完整性损坏时，健康分无效（不是低分）。
+    # 对应 Penguin 评测的 failure_code（benchmark_invalid / evaluation_failed）语义：
+    # 评测本身失效时不得分，顶层状态位显式标记，避免「拿脏数据算分」。
+    physical = results["checks"].get("file_integrity", {})
+    idx = results["checks"].get("index_integrity", {})
+    if physical.get("status") == "critical":
+        results["score_status"] = "invalid"
+        results["invalid_reason"] = "file_integrity"
+    elif idx.get("status") == "critical":
+        results["score_status"] = "invalid"
+        results["invalid_reason"] = "index_integrity"
+    elif results["overall_status"] != "healthy":
+        # 非物理问题（软指标或门控极端场景）→ 分数可计算但标记 degraded
+        results["score_status"] = "degraded"
 
     # v3.4.0: Auto-fix with backup
     if auto_fix and results["total_issues"] > 0:
@@ -625,6 +648,29 @@ def run_full_check(workspace=None, auto_fix=False):
 
         results["auto_fixed"] = fixed
 
+        # v3.10.0: 修复后验证（Penguin「候选→验证→接受/回滚」纪律落地）——
+        # 修复动作必须让硬分严格提升（或至少不倒退），否则提示回滚。
+        # 快照已在修复前由 _create_backup 生成（backup_info），回滚路径可用。
+        try:
+            pre_score = _hard_score_from_checks(results["checks"], results.get("score_status", "valid"))
+            post = run_full_check(workspace, auto_fix=False)
+            post_score = _hard_score_from_checks(post["checks"], post.get("score_status", "valid"))
+            accepted = post_score >= pre_score
+            results["fix_validation"] = {
+                "pre_score": pre_score,
+                "post_score": post_score,
+                "accepted": accepted,
+                "backup_path": (results.get("backup_info") or {}).get("backup_path"),
+            }
+            if not accepted:
+                print(
+                    f"  ⚠ [selfcheck] 修复后硬分未提升（{pre_score}→{post_score}），"
+                    f"建议从备份回滚: {results['fix_validation']['backup_path']}"
+                )
+        except Exception as e:
+            # 验证失败不阻断主流程（best-effort，与 _create_backup 同哲学）
+            results["fix_validation"] = {"error": str(e)}
+
     # Update meta
     update_meta("last_self_check", get_timestamp(), workspace)
 
@@ -648,53 +694,49 @@ def get_health_report(workspace=None):
     return run_full_check(workspace)
 
 
-def get_health_score(workspace=None):
+def _hard_score_from_checks(checks, score_status="valid"):
     """
-    Calculate a health score (0-100) based on the latest check.
-    v3.4.0: includes physical integrity + backup + logical checks.
+    v3.10.0: 硬分计算单一真相源（评分重构）。
+    软指标（completeness / gating_flood / duplicates / consistency /
+    timeliness / temporal_validity / orphans）从扣分项改为报告项，
+    总分只基于「物理完整性 + 时效性 + 真损坏」。
+    评测无效（物理损坏）时返回 0 —— 不是低分，是无效。
+    供 get_health_score 与 auto_fix 修复后验证共用，避免两处逻辑漂移。
     """
-    report = get_health_report(workspace)
-    checks = report.get("checks", {})
+    if score_status == "invalid":
+        return 0
 
     score = 100
-    # Physical checks (high penalty)
+    # 硬分一：物理完整性（高惩罚）
     for chk in ["file_integrity", "index_integrity"]:
         if chk in checks:
             score -= min(30, checks[chk].get("issues_found", 0) * 15)
-    # Backup freshness
+    # 硬分二：时效性（备份新鲜度）
     if "backup_freshness" in checks:
         b_details = checks["backup_freshness"].get("details", {})
         age = b_details.get("age_days", 0)
         if age > 90: score -= 15
         elif age > 30: score -= 5
 
-    # Logical checks (v2.1)
-    for check_name, check in checks.items():
-        issues = check.get("issues_found", 0)
-        if check_name == "duplicates":
-            score -= min(20, issues * 5)
-        elif check_name == "consistency":
-            score -= min(25, issues * 8)
-        elif check_name == "timeliness":
-            score -= min(15, issues * 3)
-        elif check_name == "completeness":
-            score -= min(15, issues * 3)
-        elif check_name == "temporal_validity":
-            score -= min(10, issues * 2)
-        elif check_name == "orphans":
-            score -= min(10, issues * 2)
-
-    # v3.7: Tail reliability checks (critical failures cost more)
-    for chk in ["gating_salience_bounds", "gating_demote_integrity", "gating_flood_protection"]:
+    # 硬分三：真损坏（门控极端场景 —— 数据一致性被破坏，非软性偏差）
+    for chk in ["gating_salience_bounds", "gating_demote_integrity"]:
         if chk in checks:
             c = checks[chk]
             issues = c.get("issues_found", 0)
-            status = c.get("status", "healthy")
             if chk == "gating_salience_bounds":
                 score -= min(30, issues * 15)
             elif chk == "gating_demote_integrity":
                 score -= min(40, issues * 20)
-            elif chk == "gating_flood_protection":
-                score -= min(25, 25) if status == "critical" else (min(10, 10) if status == "warning" else 0)
 
     return max(0, score)
+
+
+def get_health_score(workspace=None):
+    """
+    Calculate a health score (0-100) based on the latest check.
+    v3.10.0: 评分体系重构（待办 D + Penguin 评测范式「硬/软指标分域」）。
+    委托 _hard_score_from_checks（单一真相源）。
+    """
+    report = get_health_report(workspace)
+    checks = report.get("checks", {})
+    return _hard_score_from_checks(checks, report.get("score_status", "valid"))

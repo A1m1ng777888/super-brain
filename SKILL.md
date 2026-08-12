@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.9.8
-released: 2026-08-06
+version: v3.10.0
+released: 2026-08-12
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.9.8。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。278 项回归零失败。v3.9.6（自检评分优化）：gating_flood ratio 阈值 0.40→0.70、duplicates simhash 0.75→0.85、--fix 自动合并 0.95→0.85、task 默认 task_status=active、completeness 白名单扩展、自动化升级。177 项回归零失败。v3.9.7（自动触发断裂链修复）：write_json 返回值补全消假警告、跨会话硬步骤死锁修复（exit 2→自动重置放行）。270 项回归零失败。v3.9.8（mattpocock 纪律库吸收）：decompose 曳光弹切片规格（blocking_edges/context_window_fit/宽重构 expand-contract）、frontier 拷问法升级反向采访、新增 domain 项目术语表（CONTEXT.md 共享语言）、双轴 code-review + Fowler 12 味道基线固化（references/review-guide.md）。313 项回归零失败。纯标准库零依赖。"
+description: "Super Brain 超脑认知增强技能 v3.10.0。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。v3.9.6（自检评分优化）：gating_flood ratio 阈值 0.40→0.70、duplicates simhash 0.75→0.85、--fix 自动合并 0.95→0.85、task 默认 task_status=active、completeness 白名单扩展。v3.9.7（自动触发断裂链修复）：write_json 返回值补全消假警告、跨会话硬步骤死锁修复。v3.9.8（mattpocock 纪律库吸收）：decompose 曳光弹切片规格、frontier 拷问法、domain 项目术语表、双轴 code-review。v3.10.0（评分体系重构，Penguin 评测范式）：① 硬/软指标分域——软指标（completeness/gating_flood/duplicates 等）从扣分项改为报告项，总分只基于物理完整性+时效性+真损坏（待办 D 落地）② 有效性协议——物理损坏时 score_status=invalid（不是低分，是无效），顶层状态位与分数正交 ③ 修复后验证——--fix 后硬分未提升则提示回滚（fix_validation）。329 项回归零失败。纯标准库零依赖。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.9.8
+# Super Brain (超脑) — 认知增强技能 v3.10.0
 
 ## 概述
 
@@ -685,6 +685,7 @@ input_schema:
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.10.0** | **2026-08-12** | **评分体系重构（待办 D + Penguin 评测范式落地）：** ① **硬/软指标分域**——`sb_selfcheck.py` 重构 `get_health_score()`，软指标（completeness/gating_flood/duplicates/consistency/timeliness/temporal_validity/orphans）从扣分项改为报告项，总分只基于「物理完整性+时效性+真损坏」；抽 `_hard_score_from_checks()` 单一真相源。② **有效性协议**——`run_full_check` 顶层新增 `score_status`（valid/invalid/degraded）+ `invalid_reason`：物理损坏 = 评测无效（score 返回 0），不是低分；与分数正交。③ **修复后验证**——`--fix` 后自动重检，`fix_validation` 记录 pre/post 硬分与 accepted，未提升则提示回滚（快照已由 backup_info 提供）。④ CLI `selfcheck`/`health` 暴露 score_status。新增 `test_v310.py`（16 项）。329 项回归零失败（49+71+92+36+7+8+15+35+16）。 |
 | **v3.9.8** | **2026-08-06** | **mattpocock 纪律库吸收（四项升级）：** ① **decompose 曳光弹切片规格**（借鉴 to-tickets）——`_build_subtask` 新增 `blocking_edges`（阻塞边声明，默认空=可立即启动）+ `context_window_fit`（`_estimate_context_fit` 估算切片是否单个全新上下文窗口装下，超预算/含多独立要求→建议再拆）；`decompose_task` 新增 `slices` 汇总 + `wide_refactor` 检测（`detect_wide_refactor`——改名/类型替换/目录重组等波及全库的机械变更→expand-contract 三步序列，不做曳光弹）。② **frontier 拷问法升级反向采访**（借鉴 grilling）——设计树按 rounds 工作、每轮问整片 frontier、每问编号+附推荐答案、事实是 Agent 的活决策是用户的活、frontier 清空才动手。③ **新增 domain 项目术语表**（借鉴 CONTEXT.md 共享语言）——新模块 `sb_domain.py`，术语只存词汇定义零实现细节、当刻即写、歧义标记消解、可导出 CONTEXT.md；CLI：`domain add/get/list/remove/ambiguity/ambiguities/export/stats`。④ **双轴 code-review 固化**（借鉴 code-review）——新增 `references/review-guide.md`：Standards×Spec 并行子 agent 不合并、Fowler 12 坏味道基线全文（供注入 prompt）、repo overrides 规则、GLM-5.2 审阅实验 6 种系统性缺陷模式沉淀。新增 `test_v38.py`(35 项)。313 项回归零失败（49+71+92+36+7+8+15+35）。 |
 | **v3.9.7** | **2026-07-24** | **自动触发断裂链修复：** ① 修复 `write_json` 无返回值 → `mark_search_done` 每次打印假"写入失败"警告（v3.9.5 回归）② 修复跨会话硬步骤死锁——过期窗口 / 从未检索场景改为自动重置计时器并放行，而非 `exit 2` 拦截，消除跨会话自动入库静默丢失。270 项回归零失败（15+36+49+71+92+7）。|
 | **v3.9.6** | **2026-07-20** | **自检评分优化（消除振荡式扣分）：** ① 阈值调整：gating_flood ratio 0.40→0.70（密集使用场景不再误报）、duplicates simhash 0.75→0.85（跨会话项目描述不再误标）、--fix 自动合并 0.95→0.85（与检测阈值对齐）② 默认值补全：TYPE_DEFAULTS["task"] 新增 task_status="active"，新 task 天然不触发 completeness 误报 ③ completeness 白名单扩展：排除列表 +active/in_progress/pending ④ VERSION 3.9.5→3.9.6 ⑤ 自动化升级：skip 旧 maintenance/cleanup 脚本路径，改为 selfcheck --fix + 自动 demote + 自动归档 ⑥ 测试适配：177 项回归零失败（49+92+36）。|
