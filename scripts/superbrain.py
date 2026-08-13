@@ -380,6 +380,7 @@ def cmd_forgetting_status(args):
     # 精简输出：只列每个档位 + 项目明细表
     print_json({
         "total": result["total"],
+        "active": result["active"],
         "exempt": result["exempt"],
         "tier_counts": result["tier_counts"],
         "projects": {

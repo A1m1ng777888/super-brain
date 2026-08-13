@@ -67,11 +67,11 @@ UNIX_HOME_RE = re.compile(r'(?<!\w)/(?:home|Users|root)/[\u4e00-\u9fffa-zA-Z0-9_
 # 排除：脱敏脚本自身、测试文件（含占位测试路径的不可脱敏）、__pycache__
 TARGET_FILES = (
     "sb_capability.py", "sb_context.py", "sb_core.py", "sb_domain.py",
-    "sb_entanglement.py", "sb_gating.py", "sb_graph.py", "sb_longterm.py",
-    "sb_memory.py", "sb_mermaid.py", "sb_obsidian.py", "sb_orchestrator.py",
-    "sb_perception.py", "sb_pipeline.py", "sb_reasoning.py", "sb_search.py",
-    "sb_selfcheck.py", "sb_skillopt.py", "sb_token_roi.py", "sb_trace.py",
-    "superbrain.py",
+    "sb_entanglement.py", "sb_forgetting.py", "sb_gating.py", "sb_graph.py",
+    "sb_longterm.py", "sb_memory.py", "sb_mermaid.py", "sb_obsidian.py",
+    "sb_orchestrator.py", "sb_perception.py", "sb_pipeline.py", "sb_reasoning.py",
+    "sb_search.py", "sb_selfcheck.py", "sb_skillopt.py", "sb_token_roi.py",
+    "sb_trace.py", "superbrain.py",
 )
 
 

@@ -1,5 +1,30 @@
 # Changelog — Super Brain 超脑
 
+## v3.11.0 (2026-08-13) — 遗忘治理引擎 + 检索增强
+
+### 新增 1: `sb_forgetting` 遗忘治理模块（v1.0.0）
+
+- 遗忘优先级 = 规模因子 S × (1 − 活跃度因子 A) × 记忆衰减因子 D，纯标准库、零新存储
+- 项目三档（按最后访问中位数分档）：active（≤14 天）/ warm（15–45 天）/ dormant（>45 天）
+- 软切降权：dormant 0.5 / warm 0.8 / active 1.0，身份/护栏记忆（砚/user/潜进/超脑等）永远豁免
+- CLI：`forgetting status`（项目档位 + 豁免统计）、`scan`（dry-run 候选预览）、`apply`（dormant 批量 demote，幂等）
+- 两天观察期验证：dormant 首次触发（RAG/Transformer 46 天滑过 45 天线）、降权不误伤强相关检索
+
+### 新增 2: 检索 entity 精确命中 boost
+
+- 查询词与记忆 entity 精确命中（大小写不敏感）时，排序阶段加 `ENTITY_HIT_BOOST=0.04`
+- 修复实验 1「RAG与记忆」反例：entity 强相关但 content 词面不重叠的记忆，RRF 排名过低被 limit 截断（rank 51 → top3）
+- 设计约束：boost 只在「过滤后排序」阶段生效，不参与 dynamic_threshold 计算，避免抬高阈值误滤其他记忆
+
+### 修复 1: v3.10.0 发布遗漏
+
+- `sb_forgetting.py` / `test_forgetting.py` 未随 v3.10.0 打包，致 `superbrain.py` import 时 `ModuleNotFoundError`，本次一并补上
+
+### 回归验证
+
+- 新增 `test_forgetting.py`（23 项）+ `test_v3.py` 两回归（entity boost、阈值污染防护）
+- 全量回归零失败：test_superbrain 49 + test_v2 71 + test_v3 94 + test_v36 36 + test_obsidian 7 + test_prepublish_strip 8 + test_p1 15 + test_v38 35 + test_v310 16 + test_forgetting 23
+
 ## v3.10.0 (2026-08-12) — 评分体系重构（待办 D + Penguin 评测范式落地）
 
 来源：PenguinHarness（企鹅驾驭师）深度研究（2026-08-12，源码级拆解）。借鉴其评测协议三行映射：① 硬/软指标分域 ② 有效性协议（评测失效不得分）③ 候选→验证→接受/回滚。对应工作记忆待办 D（v3.10.0 评分体系重构——软指标从扣分项改为报告项）。

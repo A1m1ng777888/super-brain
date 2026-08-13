@@ -30,6 +30,14 @@ CJK_BIGRAM_PATTERN = re.compile(r'[\u4e00-\u9fff]{2}')
 # v3.0.0: Default hash bits for ternary system
 DEFAULT_TERNARY_BITS = 64
 
+# v3.11: entity 精确命中 boost —— 查询 token 与记忆 entity 完全一致（大小写不敏感）
+# 时给 RRF 分数加固定 boost，修复「entity 强相关但 content 词面不重叠」的记忆
+# 排名过低被 limit 截断（实验 1 RAG 反例：查询 'RAG与记忆' 时 RAG 记忆 RRF≈0.058，
+# 排 51-57 名，被 limit=10/20 截断）。boost=0.04 使 RAG 记忆升至 top3。
+# 量纲依据：RRF 满分 6/(K+1)≈0.098，一个 rank1 信号贡献 1/61≈0.016；
+# entity 精确命中是强信号（记忆就是关于该实体），给 ~2.5 个 rank1 信号强度。
+ENTITY_HIT_BOOST = 0.04
+
 
 def tokenize(text):
     """
@@ -562,6 +570,8 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
     query_tokens = tokenize(query)
     query_simhash = simhash(query)
     query_ternary = ternary_hash(query)  # v3.0.0
+    # v3.11: 预计算查询 token 的小写集合，供 entity 精确命中判断（大小写不敏感）
+    query_lower_tokens = {t.lower() for t in query_tokens}
 
     # v3.0.0: Word network query expansion
     expanded_tokens = set(query_tokens)
@@ -647,6 +657,16 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
     if not candidates_raw:
         return []
 
+    # v3.11: entity 精确命中 boost —— 修复 entity 强相关但 content 词面不重叠时
+    # 排名过低被 limit 截断（实验 1 RAG 反例）。检测标准：记忆 entity（非空、小写后）
+    # 与查询任一 token 完全一致。命中者在最终排序前加固定 boost。
+    # 注意：boost 只在「过滤后排序」阶段生效，不参与 dynamic_threshold 计算——
+    # 否则会抬高 top_score → 抬高 dynamic_min → 误滤掉其他中等相关记忆。
+    entity_hit_flags = []
+    for mem, _mt, _scores in candidates_raw:
+        ent = (mem.get("entity") or "").strip().lower()
+        entity_hit_flags.append(bool(ent) and ent in query_lower_tokens)
+
     # v3.8.x: RRF 融合（Reciprocal Rank Fusion），分数 = Σ 1/(K+rank)，K=60。
     # 6 路信号各自排序取名次，按名次融合——免调权、免归一化，比手调权重更稳。
     K = 60
@@ -663,19 +683,27 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
             rrf_scores[i] += 1.0 / (K + rank)
             prev_val = val
 
-    candidates = [(candidates_raw[i][0], rrf_scores[i], candidates_raw[i][1]) for i in range(n)]
+    # 原始 RRF 分数（不含 boost），供 dynamic_threshold 计算——避免 boost 污染阈值线
+    base_candidates = [
+        (candidates_raw[i][0], rrf_scores[i], candidates_raw[i][1])
+        for i in range(n)
+    ]
 
     # 动态阈值（RRF 量纲：满分 6/(K+1)≈0.098，典型相关 ≈0.05~0.09）
     if dynamic_threshold:
-        top_score = max(c[1] for c in candidates)
+        top_score = max(c[1] for c in base_candidates)
         dynamic_min = max(0.02, min(0.07, top_score * 0.5))
         effective_threshold = dynamic_min
     else:
         # 非动态模式：把原 weighted-sum 量纲的阈值夹到 RRF 量纲范围内
         effective_threshold = min(similarity_threshold, 0.07)
 
-    # Filter and sort
-    results = [(m, s, t) for m, s, t in candidates if s >= effective_threshold]
+    # Filter，然后在结果上叠加 entity boost 并排序（boost 只影响排序，不影响过滤）
+    results = [
+        (m, s + (ENTITY_HIT_BOOST if entity_hit_flags[i] else 0.0), t)
+        for i, (m, s, t) in enumerate(base_candidates)
+        if s >= effective_threshold
+    ]
     results.sort(key=lambda x: x[1], reverse=True)
     return results[:limit]
 

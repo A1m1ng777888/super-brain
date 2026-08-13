@@ -144,6 +144,49 @@ _res = _sb_search.search_memories("python python", _mem, limit=10, workspace="p1
 test("P1-1: duplicate-token query lights expanded signal", len(_res) >= 1, f"got {len(_res)} results (expected >=1)")
 _sb_search.get_word_network = _orig_gwn   # 还原，避免影响后续用例
 
+# === 3c. v3.11 Regression: entity 精确命中 boost（RAG 反例）===
+# 背景：实验 1 发现查询 'RAG与记忆' 时，entity='RAG' 的记忆 RRF≈0.058、排 51-57 名，
+# 被 limit 截断 → miss。根因是 entity 与查询词精确匹配，但 content 词面不重叠。
+# 修复：entity 精确命中（大小写不敏感）在 RRF 融合后加 ENTITY_HIT_BOOST=0.04。
+print("\n--- 3c. v3.11 Regression (entity exact-hit boost) ---")
+_rag_corpus = [
+    {"content": "RAG三层检索架构：召回层→融合层→精排层", "entity": "RAG",
+     "simhash": 0, "ternary_hash": None},
+    {"content": "RAG工业级TopK：粗排取Top50不漏", "entity": "RAG",
+     "simhash": 0, "ternary_hash": None},
+    # 干扰项：content 含"记忆"但 entity 不匹配（词面相关、实体无关）
+    {"content": "记忆系统采用互补分层策略，记忆是核心", "entity": "记忆架构",
+     "simhash": 0, "ternary_hash": None},
+    {"content": "记忆与知识图谱的关联研究", "entity": "记忆架构",
+     "simhash": 0, "ternary_hash": None},
+]
+# 还原真实词网（避免 _FakeWN 干扰），用独立 workspace 名
+_rag_res = _sb_search.search_memories("RAG与记忆", _rag_corpus, limit=5, workspace="rag_reg")
+_rag_top_entity = [_rag_res[i][0].get("entity") for i in range(len(_rag_res))]
+test("v3.11: entity exact-hit 记忆进入 top3",
+     any(e == "RAG" for e in _rag_top_entity[:3]),
+     f"top3 entity={_rag_top_entity[:3]}, RAG 应在其中")
+
+# === 3d. v3.11 Regression: entity boost 不得污染 dynamic_threshold ===
+# 背景：早期实现把 boost 加在 RRF 分数上再算 dynamic_threshold，导致 boost 抬高
+# top_score → 抬高 dynamic_min → 误滤掉其他中等相关记忆（实测「超脑检索机制」保留数
+# 从 131 掉到 50）。修复：boost 只在过滤后排序阶段生效，阈值用原始 RRF 分数计算。
+print("\n--- 3d. v3.11 Regression (entity boost must not pollute threshold) ---")
+_thr_corpus = [
+    # entity 精确命中查询词「检索」，boost 后成为 top
+    {"content": "检索是信息获取的核心步骤", "entity": "检索", "simhash": 0, "ternary_hash": None},
+    # 一批 content 含「检索」但 entity 不同（词面相关，boost 不应误滤它们）
+    {"content": "检索系统的倒排索引设计", "entity": "搜索引擎", "simhash": 0, "ternary_hash": None},
+    {"content": "检索算法的排序策略研究", "entity": "搜索", "simhash": 0, "ternary_hash": None},
+    {"content": "检索与召回的关系分析", "entity": "搜索", "simhash": 0, "ternary_hash": None},
+]
+# 用 dynamic_threshold=True + 大 limit，观察是否因 boost 抬高阈值而漏掉词面相关记忆
+_thr_res = _sb_search.search_memories("检索", _thr_corpus, limit=20, dynamic_threshold=True, workspace="thr_reg")
+_thr_entities = [m.get("entity") for m, _, _ in _thr_res]
+test("v3.11: entity boost 不误滤词面相关记忆",
+     "搜索引擎" in _thr_entities or "搜索" in _thr_entities,
+     f"结果 entity={_thr_entities}，词面相关记忆被 boost 误滤")
+
 # === 4. Pipeline (Classification) Tests ===
 print("\n--- 4. Classification Pipeline (分类管线) ---")
 

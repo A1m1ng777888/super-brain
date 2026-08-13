@@ -28,6 +28,8 @@ from sb_search import (
 )
 # v3.6.1: 接入 GWT 门控层（冷存储/活跃工作空间两层）。sb_gating 仅依赖 sb_core，无反向 import，单向安全。
 from sb_gating import compute_salience, is_promoted, _audit_log
+# v1.0.0: 遗忘治理（实验 1 结论落地：软切降权，不降级检索算法）
+from sb_forgetting import compute_project_stats, get_memory_weight
 
 
 # Memory types
@@ -446,6 +448,21 @@ def search(query, limit=10, workspace=None, update_access_stats=False):
             score = score * 0.85
         scored_results.append((mem, score, match_type))
     scored_results.sort(key=lambda x: x[1], reverse=True)
+
+    # v1.0.0: 遗忘感知降权（软切，软指标报告项）
+    # 实验 1 结论：不降级检索算法（中文禁退回标签匹配），只对 dormant/warm 项目记忆
+    # 的召回分数打折。dormant=0.5 / warm=0.8 / active=1.0；pinned/身份类永远 1.0。
+    # 项目活跃度基于 active 记忆统计（read_memories 已过滤），与 gating 层同源。
+    if scored_results and active:
+        try:
+            fg_stats = compute_project_stats(active)
+            scored_results = [
+                (mem, score * get_memory_weight(mem, fg_stats), match_type)
+                for mem, score, match_type in scored_results
+            ]
+            scored_results.sort(key=lambda x: x[1], reverse=True)
+        except Exception:
+            pass  # 遗忘治理是软指标，任何异常不阻塞检索主流程
 
     # R4: 写副作用参数化——update_access_stats=False 时不更新 access_count
     # v3.8.7: 复用第一次 read_memories 的引用（memories），避免二次全读
