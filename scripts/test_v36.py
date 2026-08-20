@@ -13,6 +13,7 @@ Author: A1m1ng777888
   T5 memory context --workspace-only 选择性过滤
   T6 门控 CLI 处理函数可调用性
   T7 v3.6.1 自动晋升（add_memory / longterm ingest 入库即晋升）+ demote 修复
+  T8 v3.11.x 容量上限持久执行（chain_ignite / get_active_workspace 统一加固）
 全程使用隔离的 "test" workspace，不触碰生产数据。
 """
 
@@ -279,6 +280,50 @@ def test_auto_promotion_and_demote():
           m_lo_after.get("gating_override") == "demote")
 
 
+# --- T8: v3.11.x 容量加固（洪水保护回归） ----------------------------------
+def test_cap_enforcement():
+    print("\n[T8] 容量上限持久执行（chain_ignite / get_active_workspace 统一加固）")
+    reset_workspace()
+    set_threshold(0.5, workspace=WS)
+
+    # 8a: 单链 60 节点（低置信），手动点燃 1 个 → chain_ignite 不得推过 cap
+    cid = "chain_cap_test"
+    for i in range(60):
+        add_memory(content=f"链节点 {i}", mem_type="reasoning_intermediate",
+                   entity="gwt", confidence=0.1, workspace=WS)
+    mems = read_memories(WS)
+    for m in mems:
+        m["chain_id"] = cid
+    write_memories(mems, WS)
+    promote(mems[0]["id"], workspace=WS)
+    res = chain_ignite(WS)
+    after = get_active_workspace(WS, cap=DEFAULT_CAP)
+    still = [m for m in read_memories(WS)
+             if m.get("status") == "active" and m.get("workspace_promoted", False)]
+    check("8a: chain_ignite 不推过 DEFAULT_CAP", len(still) <= DEFAULT_CAP,
+          f"persisted={len(still)} cap={DEFAULT_CAP}")
+    check("8a: 链填满容量（整链原子 > 个体切分）", len(still) == DEFAULT_CAP,
+          f"persisted={len(still)}")
+    check("8a: cap_demoted 报告降级", res.get("cap_demoted", 0) > 0,
+          str(res))
+
+    # 8b: 无链批量晋升超容 → get_active_workspace 持久降级，标志不再只增不减
+    reset_workspace()
+    set_threshold(0.5, workspace=WS)
+    for i in range(30):
+        add_memory(content=f"高位事实 {i}", mem_type="fact", entity="x",
+                   confidence=0.95, workspace=WS)
+    # 三连调用：旧版每次调用标志只增不减，新版必须稳定在 cap 内
+    for _ in range(3):
+        get_active_workspace(WS, cap=10)
+    still = [m for m in read_memories(WS)
+             if m.get("status") == "active" and m.get("workspace_promoted", False)]
+    check("8b: 反复调用后持久标志稳定在 cap 内", len(still) == 10,
+          f"persisted={len(still)} cap=10")
+    check("8b: 可逆性——无 gating_override 残留",
+          all(m.get("gating_override") is None for m in still), "发现 override 残留")
+
+
 if __name__ == "__main__":
     ensure_workspace(WS)
 
@@ -289,6 +334,7 @@ if __name__ == "__main__":
     test_context_workspace_only()
     test_gating_cli_functions()
     test_auto_promotion_and_demote()
+    test_cap_enforcement()
 
     # 清理隔离 workspace（避免 rmtree，沙箱禁用；原地清空记忆）
     write_memories([], WS)

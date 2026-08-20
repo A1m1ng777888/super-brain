@@ -104,8 +104,14 @@ def check_file_integrity(workspace=None):
         try:
             with open(idx_path, "r", encoding="utf-8") as f:
                 idx_data = json.load(f)
-            # Verify index has expected structure
-            if "ternary_buckets" not in idx_data and "word_network" not in idx_data:
+            # Verify index has expected structure.
+            # v3.9.3+ 现行格式（build_index 输出）：keyword_index + word_network_stats。
+            # 旧版格式 ternary_buckets / word_network 仅作兼容判定。
+            # 修复（审阅高位项 file_integrity）：旧检查器只认旧键，对现行格式误报
+            # "索引结构不完整"，导致 Score Status=INVALID 假阳性。
+            has_current = "keyword_index" in idx_data and "word_network_stats" in idx_data
+            has_legacy = "ternary_buckets" in idx_data and "word_network" in idx_data
+            if not has_current and not has_legacy:
                 issues.append({"file": "index.json", "label": "检索索引", "problem": "索引结构不完整，可能需重建"})
         except:
             issues.append({"file": "index.json", "label": "检索索引", "problem": "索引文件损坏，需重建"})
@@ -213,12 +219,17 @@ def check_backup_freshness(workspace=None):
     }
 
 
-def check_consistency(workspace=None):
+def check_consistency(workspace=None, issues=None):
     """
     Check for logical contradictions in memories.
     Flags memories with same entity+type but potentially conflicting content.
+
+    v3.11.x: 新增可选 issues 参数——run_full_check 缓存 find_issues 一次，
+    consistency 与 duplicates 共用，避免同一批 O(n²) 计算重复两遍。
+    issues=None 时行为与旧版完全一致（自行调用 find_issues）。
     """
-    issues = find_issues(workspace)
+    if issues is None:
+        issues = find_issues(workspace)
     contradictions = issues.get("potential_contradictions", [])
     return {
         "check": "consistency",
@@ -429,11 +440,15 @@ def check_orphans(workspace=None):
     }
 
 
-def check_duplicates(workspace=None):
+def check_duplicates(workspace=None, issues=None):
     """
     Check for duplicate memories using SimHash similarity.
+
+    v3.11.x: 新增可选 issues 参数，与 check_consistency 共用一次 find_issues。
+    issues=None 时行为与旧版完全一致。
     """
-    issues = find_issues(workspace)
+    if issues is None:
+        issues = find_issues(workspace)
     duplicates = issues.get("duplicates", [])
 
     return {
@@ -566,6 +581,10 @@ def run_full_check(workspace=None, auto_fix=False):
         "invalid_reason": None
     }
 
+    # v3.11.x: find_issues（O(n²) 去重+矛盾扫描）只算一次，
+    # consistency 与 duplicates 共用，避免同一批计算重复两遍。
+    shared_issues = find_issues(workspace)
+
     # Run all checks (physical first, then logical)
     checks = [
         # v3.4.0: 物理层
@@ -573,12 +592,12 @@ def run_full_check(workspace=None, auto_fix=False):
         check_index_integrity(workspace),
         check_backup_freshness(workspace),
         # 逻辑层
-        check_consistency(workspace),
+        check_consistency(workspace, shared_issues),
         check_timeliness(workspace),
         check_temporal_validity(workspace),
         check_completeness(workspace),
         check_orphans(workspace),
-        check_duplicates(workspace),
+        check_duplicates(workspace, shared_issues),
         # v3.7: 尾部可靠性 — 门控层极端场景
         check_gating_salience_bounds(workspace),
         check_gating_demote_integrity(workspace),

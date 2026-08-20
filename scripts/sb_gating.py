@@ -146,12 +146,83 @@ def is_promoted(mem, workspace=None):
 
 
 # --- Ignition & active workspace ------------------------------------------
+def _cap_enforce(active, cap, workspace):
+    """
+    v3.11.x: 容量上限的持久执行器（审阅高位项 gating_flood_protection 加固）。
+
+    旧版 get_active_workspace 只截断返回值、不回写降级，workspace_promoted
+    标志随每次调用只增不减（实测 95 > cap 50），晋升洪水保护持续 CRITICAL。
+    chain_ignite 单独调用同样绕过了容量约束。本执行器统一两条路径：
+
+      1. 手动 promote override 视为钉选，优先保留（override 语义优先于容量）；
+      2. 其余晋升按「链为单位」排序（链内最高 salience 代表整链），整链能放进
+         剩余容量则整链保留——推理链不被容量切碎；
+      3. 放不下的链按个体 salience 填满剩余槽位（硬上限优先于链原子性）；
+      4. 超容部分持久降级：清 workspace_promoted 标志、写可逆审计，
+         **不带 gating_override**，下次按 salience 重评可自然回迁。
+
+    Returns:
+        int: 本次降级的记忆数（0 = 无需降级）。
+    """
+    if not cap:
+        return 0
+    promoted = [m for m in active if m.get("workspace_promoted")]
+    if len(promoted) <= cap:
+        return 0
+
+    def sal(m):
+        return compute_salience(m, workspace)
+
+    manual = [m for m in promoted if m.get("gating_override") == "promote"]
+    auto = [m for m in promoted if m.get("gating_override") != "promote"]
+    kept = {m["id"] for m in manual}
+
+    units = []  # (代表 salience, 成员列表)；无链记忆各自成单元
+    by_chain = {}
+    for m in auto:
+        cid = m.get("chain_id")
+        if cid:
+            by_chain.setdefault(cid, []).append(m)
+        else:
+            units.append((sal(m), [m]))
+    for members in by_chain.values():
+        units.append((max(sal(m) for m in members), members))
+    units.sort(key=lambda t: t[0], reverse=True)
+
+    remaining = cap - len(kept)
+    for _, members in units:
+        if remaining <= 0:
+            break
+        if len(members) <= remaining:
+            kept.update(m["id"] for m in members)
+            remaining -= len(members)
+        else:
+            members.sort(key=sal, reverse=True)
+            kept.update(m["id"] for m in members[:remaining])
+            remaining = 0
+
+    demoted = 0
+    for m in promoted:
+        if m["id"] not in kept:
+            before = {"workspace_promoted": True}
+            m["workspace_promoted"] = False
+            _audit_log("cap_demote", m["id"],
+                       f"容量上限 cap={cap}：超容自动降级（可逆，按 salience 重评）",
+                       before, {"workspace_promoted": False},
+                       reversible=True, workspace=workspace)
+            demoted += 1
+    return demoted
+
+
 def chain_ignite(workspace=None):
     """
     Paper's Ignition: if ANY node of a reasoning chain is promoted (by salience
     or by manual override), the WHOLE chain ignites into the workspace. This
     prevents intermediate reasoning nodes from being starved when only one
     link happens to be retrieved.
+
+    v3.11.x: 点燃后执行 _cap_enforce（DEFAULT_CAP），整链点燃不再能把
+    晋升数推过容量上限——洪水保护对独立调用路径同样成立。
     """
     memories = read_memories(workspace)
     active = [m for m in memories if m.get("status") == "active"]
@@ -178,9 +249,13 @@ def chain_ignite(workspace=None):
                        f"Chain ignited via chain_id={cid}",
                        before, after, reversible=True, workspace=workspace)
 
-    if changed:
+    # v3.11.x: 点燃后统一执行容量上限（与 get_active_workspace 共用执行器）
+    cap_demoted = _cap_enforce(active, DEFAULT_CAP, workspace)
+
+    if changed or cap_demoted:
         write_memories(memories, workspace)
-    return {"chain_promoted": len(chain_promoted), "changed": changed}
+    return {"chain_promoted": len(chain_promoted), "changed": changed,
+            "cap_demoted": cap_demoted}
 
 
 def get_active_workspace(workspace=None, cap=DEFAULT_CAP):
@@ -223,9 +298,21 @@ def get_active_workspace(workspace=None, cap=DEFAULT_CAP):
             m["workspace_promoted"] = True
 
     promoted = [m for m in active if m.get("workspace_promoted")]
-    promoted.sort(key=lambda m: compute_salience(m, workspace), reverse=True)
-    if cap and len(promoted) > cap:
-        promoted = promoted[:cap]
+    # 手动 promote override 视为钉选，优先保留；其余按 salience 降序
+    manual = [m for m in promoted if m.get("gating_override") == "promote"]
+    auto = [m for m in promoted if m.get("gating_override") != "promote"]
+    auto.sort(key=lambda m: compute_salience(m, workspace), reverse=True)
+    ranked = manual + auto
+    if cap and len(ranked) > cap:
+        # v3.11.x 修复（审阅高位项 gating_flood_protection）：
+        # 旧版只截断返回值、不回写降级，workspace_promoted 标志随每次调用
+        # 只增不减（实测 95 > cap 50）。现在由 _cap_enforce 持久降级超容
+        # 部分（可逆、无 override、链为单位保留），洪水保护不依赖调用方自律。
+        _cap_enforce(active, cap, workspace)
+        kept_ids = {m["id"] for m in active if m.get("workspace_promoted")}
+        promoted = [m for m in ranked if m["id"] in kept_ids]
+    else:
+        promoted = ranked
 
     write_memories(memories, workspace)
     return promoted

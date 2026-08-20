@@ -718,14 +718,28 @@ def find_duplicates(memories, similarity_threshold=0.85):
     """
     duplicates = []
     n = len(memories)
+    if n < 2:
+        return duplicates
+
     # Build corpus for TF-IDF
     all_docs = [tokenize(m.get("content", "")) for m in memories]
+
+    # v3.11.x 性能修复：预建 IDF doc_freq 表 + 预计算每篇 doc 的 tf Counter，
+    # 消除 find_duplicates 热路径「每候选 × 每 term 全库扫 doc_freq」的
+    # O(n²·terms·doc_len) 退化（n=382 实测 ~235s → 秒级）。
+    # 语义与原 tf_idf_cosine_similarity(content1, content2, all_docs) 逐项等价：
+    # doc_freq 按「每文档对 term 至多计 1」构建，公式 idf=log((N+1)/(df+1))+1 相同，
+    # 浮点运算序列一致，结果 bit 级一致（与 v3.9.4 _tfidf_cosine_precomputed 同源）。
+    doc_freq = Counter()
+    for toks in all_docs:
+        for term in set(toks):
+            doc_freq[term] += 1
+    tf_list = [Counter(toks) for toks in all_docs]
 
     for i in range(n):
         h1 = memories[i].get("simhash", 0)
         if h1 == 0:
             h1 = simhash(memories[i].get("content", ""))
-        content1 = memories[i].get("content", "")
         for j in range(i + 1, n):
             h2 = memories[j].get("simhash", 0)
             if h2 == 0:
@@ -734,9 +748,9 @@ def find_duplicates(memories, similarity_threshold=0.85):
             sh_sim = simhash_similarity(h1, h2)
             if sh_sim < 0.65:
                 continue
-            # Stage 2: TF-IDF precise check
-            content2 = memories[j].get("content", "")
-            tfidf_sim = tf_idf_cosine_similarity(content1, content2, all_docs)
+            # Stage 2: TF-IDF precise check（doc_freq 查表，等价于原全库扫描）
+            tfidf_sim = _tfidf_cosine_precomputed(
+                tf_list[i], tf_list[j], doc_freq, n)
             # Use the higher of the two as the final similarity
             final_sim = max(sh_sim, tfidf_sim)
             if final_sim >= similarity_threshold:

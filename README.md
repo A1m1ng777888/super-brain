@@ -7,7 +7,7 @@
 ## 直接访问
 
 - GitHub 仓库：https://github.com/A1m1ng777888/super-brain
-- 最新版本：**v3.11.0**
+- 最新版本：**v3.11.1**
 
 ## 核心能力
 

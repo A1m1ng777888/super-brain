@@ -1,5 +1,36 @@
 # Changelog — Super Brain 超脑
 
+## v3.11.1 (2026-08-20) — 门控容量持久执行 + 自检索引格式兼容（DSH 审阅高位项）
+
+来源：DSH（鲸砚）会话审阅 selfcheck CRITICAL 高位项 + 配套加固，随后补齐版本管理快照。
+
+### 修复 1: gating_flood_protection（晋升洪水，95 > cap 50）
+
+- 根因：get_active_workspace 的 cap 截断只截返回值、不回写降级，workspace_promoted 标志随调用只增不减；chain_ignite 独立调用路径完全不经过容量约束
+- 修复：新增 sb_gating._cap_enforce 容量持久执行器——手动 promote 钉选优先；链为单位保留（整链能放入剩余容量则整链进，放不下按个体 salience 填满）；超容部分清标志 + 可逆审计（cap_demote）、不带 gating_override，下次按 salience 重评可自然回迁；get_active_workspace 与 chain_ignite 统一过闸（chain_ignite 返回新增 cap_demoted 字段）
+- 数据修复：示例工作区A 95→50、示例工作区B 74→50；全 8 工作区复扫 over_cap=0
+
+### 修复 2: file_integrity 索引格式假阳性
+
+- 根因：check_file_integrity 只认旧键 ternary_buckets/word_network，v3.9.3+ build_index 实际输出 keyword_index/word_network_stats → 健康评分误报 INVALID
+- 修复：检查器兼容两代键名（现行格式优先判定，旧键仅作兼容）；并重建滞后索引（378→428 条，44513 tokens）
+
+### 并入 1: find_duplicates TF-IDF 预计算（v3.11.0 发布后 08-17 本地改动，未随包发布）
+
+- 预建 IDF doc_freq 表 + 每篇 doc 的 tf Counter，消除热路径「每候选 × 每 term 全库扫 doc_freq」的 O(n²·terms·doc_len) 退化（n=382 实测 ~235s → 秒级）
+- 语义与原 tf_idf_cosine_similarity 逐项等价（doc_freq 按每文档对 term 至多计 1，idf=log((N+1)/(df+1))+1 相同），结果 bit 级一致
+
+### 并入 2: memory list CLI 输出补 Source 字段（同批 08-17 未发布改动）
+
+### 并入 3: test_prepublish_strip 夹具脱敏（GitHub Phase 1 发布审查零命中）
+
+- 测试夹具中的作者用户名改为通用 devuser——夹具本身也不得带真实用户名，发布审查的个人路径扫描零命中
+
+### 回归验证
+
+- 新增 test_v36 T8 容量回归 5 项：单链 60 节点 chain_ignite 不推过 DEFAULT_CAP / 链填满容量且无 override 残留 / 无链批量反复调用持久标志稳定在 cap 内（36→41 项）
+- 全量回归零失败：test_superbrain 49 + test_v2 71 + test_v3 94 + test_v36 41 + test_obsidian 7 + test_prepublish_strip 8 + test_p1 15 + test_v38 35 + test_v310 16 + test_forgetting 23 = 359
+
 ## v3.11.0 (2026-08-13) — 遗忘治理引擎 + 检索增强
 
 ### 新增 1: `sb_forgetting` 遗忘治理模块（v1.0.0）

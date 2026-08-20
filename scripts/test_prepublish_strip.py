@@ -52,11 +52,12 @@ class TestStripText(unittest.TestCase):
 
     def test_unix_home_path_stripped(self):
         # P1-1: Unix 绝对路径应被脱敏
-        line = '# 默认: /home/a1m1ng/ObsidianVault'
+        # 夹具用通用用户名（GitHub Phase 1 发布审查：夹具也不得带真实用户名）
+        line = '# 默认: /home/devuser/ObsidianVault'
         res, changed = strip_text(line)
         self.assertTrue(changed, "Unix 主目录路径应被脱敏")
         self.assertIn("~/ObsidianVault", res)
-        self.assertNotIn("/home/a1m1ng", res)
+        self.assertNotIn("/home/devuser", res)
 
     def test_file_url_not_corrupted(self):
         # P2-1: file:/// 中的盘符路径不应被误伤

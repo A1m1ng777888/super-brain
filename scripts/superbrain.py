@@ -238,7 +238,7 @@ def cmd_memory_search(args):
         print(f"\n  [{match_type}] Score: {score:.3f} | ID: {mem['id']}")
         print(f"  Type: {mem['type']} | Entity: {mem['entity']} | Confidence: {mem['confidence']}")
         print(f"  Content: {mem['content']}")
-        print(f"  Timestamp: {mem.get('timestamp', 'N/A')}")
+        print(f"  Source: {mem.get('source_session', 'unknown')} | Timestamp: {mem.get('timestamp', 'N/A')}")
 
 
 def cmd_memory_update(args):
