@@ -1,5 +1,46 @@
 # Changelog — Super Brain 超脑
 
+## v3.12.0 (2026-08-31) — 检索层重建 + 图谱复活 + 相对门控（P0-A→M 十四轮）
+
+### 新增 — 自动建图
+
+- `sb_graph.build_from_memories` + CLI `graph build`（--dry-run / 幂等 / 跨进程写锁）：entity 节点、实体伪文档库级 IDF 余弦相似度、top-K+地板 scale-free 建边、`related_nodes` 回填（合并不覆盖推理链记忆 ID）、只为有边实体建节点
+- 实测：图谱 14→139 节点 / 247 边复活，entanglement 信号恢复，`graph mermaid` 从演示化石变为真实知识地图
+
+### 新增 — 相对门控（scale-free）
+
+- `get_threshold` 双模式：meta 显式阈值=手动模式（persona=0.35 身份常驻）；默认自动=阈值取 salience 排名第 k 高（k=min(cap, round(候选池×0.15))），分布漂移免重标
+- CLI `gating threshold --auto` 清除手动值回自动模式
+- 排名制对 confidence 偏移量免疫——salience 公式的偏移量问题在门控层自动失效
+
+### 新增 — 幂等写入开关（v3.11.2 并入）
+
+- `memory add --dedupe`：命中同 entity + active + simhash≥0.95 的重复时不写入、复用已有记忆（默认关闭，既有行为不变；0.95 阈值有 0.23 安全余量标定）
+
+### 修复 — 检索层重建（v3.11.2 并入）
+
+- 六通道 RRF 砍成 BM25 单路：消融证明三路噪声拖垮融合（30 行零依赖 BM25 全指标胜出、快 140 倍）
+- 新增 `_bm25_tokenize`（CJK bigram+trigram、unigram 降权 ×0.35）：修复停用词主导排序（「我们」idf=4.15 反直觉高 IDF）
+- persona 与 project 合并单次检索修量纲污染：30 题真实中文问句 recall@1 0.200→0.700、persona 槽位占用 63%→5%
+- 访问统计时点断裂修复（`access_tracking_cutoff_ts`）：forget_priority 均值 −35.6%
+
+### 修复 — 门控治理与健壮（P0-H~M）
+
+- `add_memory` 写入路径事件驱动容量执行：晋升洪水 137→50 根治（治理不再只挂查询路径）
+- 门控四写函数（get_active_workspace/chain_ignite/promote/demote）+ set_threshold 全量跨进程上锁：并发丢写面封堵
+- `get_active_workspace` 陈旧标志双向重评（只升不降导致 persona 库结构性死锁）
+- persona 工作空间阈值独立标定 0.35（0.70 对无图谱库是数学上不可达门槛）
+- calibrate / graph build post_build_promotion 统一候选池口径（328 条 override 不再污染诊断数字）
+- 两轮对抗性审阅修复 6 处真 bug（P0-K/M）
+
+### 测试
+
+- 新增 test_graph_build.py（18 项）、test_relative_gating.py（15 项）
+- 12 套件回归全绿；交付层评测 30 题真实中文问句 recall@5 0.933 / mrr 0.807
+
+---
+
+
 ## v3.11.1 (2026-08-20) — 门控容量持久执行 + 自检索引格式兼容（DSH 审阅高位项）
 
 来源：DSH（鲸砚）会话审阅 selfcheck CRITICAL 高位项 + 配套加固，随后补齐版本管理快照。

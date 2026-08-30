@@ -141,7 +141,29 @@ _mem = [{"content": "programming only topic here", "entity": "y", "simhash": 0, 
 _res = _sb_search.search_memories("python python", _mem, limit=10, workspace="p1_reg")
 # query="python python" → tokenize 含重复；记忆内容仅含扩展 token "programming"，
 # 修复前 expanded_score=0 且无其他信号达标 → 漏召回；修复后 has_expansion=True → 召回。
-test("P1-1: duplicate-token query lights expanded signal", len(_res) >= 1, f"got {len(_res)} results (expected >=1)")
+# ⚠️【已知局限 · 待办】本用例语义已于 v3.11.2 变更，改动前务必先读这段。
+#
+# 原保护目标：v3.8.3 用 len(expanded_tokens) > len(query_tokens) 判断"是否扩展"，
+# 但前者是去重 set、后者是含重复的 list，重复 token 查询（"python python"）
+# 会把两长度拉平 → 即使真扩展了也静默关闭第六路信号 → 漏召回。
+# 本用例即为此设立，防止该 bug 复发。
+#
+# v3.11.2 (P0-B)：词网络整体退出检索路径，主分改为纯 BM25 词面匹配。
+# 该 bug 路径不复存在，但**零词面重叠的查询也随之无法召回**——
+# "python python" 与 "programming only topic here" 没有任何共同 token。
+#
+# 这是代价，不是设计目标。消融（LOCOMO 448 题，按题型拆解）显示词网络
+# **平等参与每一轮融合**时是净亏损（adversarial -0.046、multi-hop -0.024），
+# 引入的噪声大于贡献。但 LOCOMO 的查询与证据出自同一段对话、天然有词面
+# 重叠，测不出零重叠场景——本用例恰好补上了这个盲区。
+#
+# 后续方向（方案 B，未实施）：词网络改作**兜底路径**而非融合通道——
+# 仅当 BM25 召回为空或分数过低时才触发扩展检索。既保住 P0-B 的收益，
+# 又不丢零重叠召回。实施前应先补该场景的量化基线。
+test("[已知局限] 零词面重叠查询在 BM25 主分下不召回（词网络兜底待实现）",
+     len(_res) == 0,
+     f"got {len(_res)} results；若此处变为 >=1，说明兜底路径已落地，"
+     f"请把本用例改回正向断言")
 _sb_search.get_word_network = _orig_gwn   # 还原，避免影响后续用例
 
 # === 3c. v3.11 Regression: entity 精确命中 boost（RAG 反例）===

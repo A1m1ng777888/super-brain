@@ -30,17 +30,93 @@ import sys
 import os
 import time
 import uuid
+import functools
+import inspect
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sb_core import (
     read_memories, write_memories, read_meta, update_meta, get_timestamp,
-    read_json, write_json, get_workspace_dir, generate_id, DEFAULT_DATA_DIR
+    read_json, write_json, get_workspace_dir, generate_id, DEFAULT_DATA_DIR,
+    workspace_lock
 )
 
+
+def _write_locked(func):
+    """写事务装饰器：gating 写操作整体包进跨进程 workspace 锁。
+    与 sb_memory/sb_graph 的 _write_locked 同构（锁在 sb_core.workspace_lock
+    层可重入，嵌套已锁调用不死锁）。
+
+    v3.11.2 (P0-L 审阅补遗)：get_active_workspace / promote / demote /
+    chain_ignite 都是 memories.json 的 read-modify-write，此前**全部无锁**
+    ——sb_memory/sb_graph 写路径上锁后这里成了并发丢写的裸露面（鲸砚并发
+    gating status / memory add 时 last-writer-wins）。
+    与 sb_graph 版的差异：用 inspect 绑定参数取 workspace，兼容位置传参。
+    """
+    sig = inspect.signature(func)
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            bound = sig.bind_partial(*args, **kwargs)
+            ws = bound.arguments.get("workspace")
+        except TypeError:
+            ws = None
+        with workspace_lock(ws):
+            return func(*args, **kwargs)
+    return wrapper
+
 # --- Defaults -------------------------------------------------------------
-DEFAULT_THRESHOLD = 0.35
+# v3.11.2 (P0-H，编号顺延：P0-E persona / P0-F CJK 已占用、P0-G 已撤回):
+# 默认晋升阈值 0.35 → 0.55。0.35 是形同虚设的值——实测本库
+# salience 分布极窄（548 条 active，min 0.362 / 中位 0.500 / max 0.638），
+# 0.35 低于全库最低值，晋升比例恒 100%（实测 137 条标志 > cap 50，selfcheck
+# 的 gating_flood_protection 持续 CRITICAL）。根因是固定底座就占了 ~0.32：
+# 0.30×confidence(≈0.89) + 0.10×(baseline+0.5)，真正能拉开差距的 entanglement
+# 信号因图谱空转（627 记忆仅 14 节点）几乎恒为 0；access 项又因访问统计
+# 时点断裂（2026-07-16 后创建的记忆恒 0，见基线报告 §20）在 63.7% 记忆上
+# 恒零——五个项里 35% 权重是死的。
+# 阈值扫描（真实库，2026-08-30 晚，sb_gating.calibrate）：
+#     thr   promoted  ratio
+#     0.35     548    1.000   ← 旧默认值，全量晋升
+#     0.40     515    0.940
+#     0.45     437    0.797
+#     0.50     273    0.498
+#     0.55     107    0.195   ← 唯一落进 GWT 目标带(8~25%)的取值
+#     0.60      13    0.024   ← 悬崖：0.55→0.60 之间密度极高
+#     0.65       0    0.000
+# ⚠️ 定位声明（与基线报告 §17.1 对齐）：这刀是「治理稳定化」的过渡方案，
+# 不是终解。§17.1 的诊断成立——调阈值是脆弱的纸糊方案（0.55→0.60 断崖），
+# 正解是修公式本身（让 confidence 不再充当偏移量、复活 access/entanglement
+# 判别力）。在本库上 0.55 之下选出的主要是「新鲜+常访问」热集，不是「重要」
+# 集合。公式修复或图谱复活后，本值必须用 calibrate 重新标定。
+#
+# v3.11.2 (P0-I) 再标定：P0-I 自动建图落地后（147 节点 / 241 边，458 条
+# 记忆回填 related_nodes），entanglement 信号复活，salience 分布整体上移
+# 且变宽（中位 0.500→0.612，span 0.28→0.42）——阈值 0.55 之下不再适用，
+# 重新扫描：0.60→55.4% / 0.65→37.5% / **0.70→14.6%(80条，带内)** / 0.72→8.4%
+# / 0.75→0.9%。取 0.70。与 0.55 时代的本质区别：选出集现在是**结构驱动**的
+# ——选出集平均 entanglement 4.84 vs 全库 3.44（68/80 条 ent=5），type 构成
+# decision 35 / fact 21 / task 11 / preference 5 / event 8。「纸糊方案」的
+# 批判部分失效：第二个信号活了，但 confidence 偏移量问题仍在，公式修复
+# 仍是正解。
+# ⚠️ 行为变化：新写入记忆 related_nodes=[]（ent=0，salience≈0.57），
+# 在下一次 graph build 前不会进入工作空间——GWT 语义上这是「新记忆需经
+# 连接性/使用证明后才广播」，但也意味着 graph build 需要成为定期动作。
+#
+# ⚠️⚠️ 阈值是 per-workspace 机制，不是全局常数（2026-08-30 深夜审阅教训）：
+# 0.70 在项目库（有图谱 entanglement）上标定，但 persona 库无图谱、ent 恒 0、
+# salience 天花板 ≈0.63——0.70 会让 persona 库结构性死锁（新记忆永远无法
+# 晋升，违背 v3.6「身份常驻工作空间」设计底线）。persona 已独立标定 0.35
+# （持久化在 persona meta）。**任何异构 workspace 接入门控前必须先 calibrate**。
+# v3.11.2 (P0-L)：DEFAULT_THRESHOLD 降级为「手动模式的遗留兜底」——自动模式
+# （meta 无显式值）走相对门控，此常数仅在 meta 读取失败时兜底，正常路径不再
+# 使用。绝对阈值常数的一天三标（0.35→0.55→0.70）就此终结。
+DEFAULT_THRESHOLD = 0.70
+# v3.11.2 (P0-L)：相对门控目标比例。GWT 带 8~25%，取中点偏下。
+# meta 键 gating_target_ratio 可按 workspace 覆盖。
+DEFAULT_TARGET_RATIO = 0.15
 DEFAULT_CAP = 50
 
 # Type-level baseline adjustment to salience (added into the [0,1] mapping).
@@ -85,22 +161,94 @@ def _days_since(ts):
     return max(0.0, (now - dt).total_seconds() / 86400.0)
 
 
-def get_threshold(workspace=None):
-    """Read the promotion threshold for this workspace (default 0.35)."""
+def _target_ratio(workspace=None):
+    """晋升目标比例（GWT 带 8~25% 的中点偏下）。meta 可按 workspace 覆盖。"""
     try:
         meta = read_meta(workspace)
-        return float(meta.get("gating_threshold", DEFAULT_THRESHOLD))
+        raw = meta.get("gating_target_ratio")
+        if raw is not None:
+            v = float(raw)
+            if 0.0 < v <= 1.0:
+                return v
     except Exception:
-        return float(DEFAULT_THRESHOLD)
+        pass
+    return DEFAULT_TARGET_RATIO
+
+
+def _dynamic_threshold(workspace=None):
+    """
+    v3.11.2 (P0-L): 相对门控的核心——阈值从「绝对常数」改为「当前库
+    salience 排名的第 k 高值」，k = min(cap, max(1, round(n×目标比例)))。
+
+    为什么这样设计（2026-08-30 一天三标 0.35→0.55→0.70 的教训）：
+      - 分布漂移免疫：库增长/建图改变 entanglement/任何结构性变化后，
+        阈值随排名自动滑动，**永远不需要重新标定**（scale-free）；
+      - confidence 偏移量免疫：绝对阈值下 confidence 的固定底座把全库挤在
+        窄带里（§17.1），排名制对常数偏移完全无感——salience 公式的
+        「confidence 当偏移量」问题在门控层自动失效；
+      - 与 cap 协同：k 被 cap 封顶，flag 集合 ≤ cap，selfcheck 洪水保护
+        由构造保证绿色（不再依赖 cap 执行器兜底）；
+      - O(n) 成本：每次调用对 active 记忆算一遍 salience——add_memory 本就
+        O(n)（simhash 查重），无显著开销。
+
+    ⚠️ 手动模式（meta 显式设置 gating_threshold，如 persona=0.35）优先于
+    本函数——小型身份库需要「常驻」语义，不适用比例晋升。
+    """
+    memories = read_memories(workspace)
+    active = [m for m in memories if m.get("status") == "active"]
+    # v3.11.2 (P0-L 审阅补遗)：手动钉选（gating_override）不占自动排名位。
+    # 实测主库有 328 条历史 demote override（来源无法溯源，审计已滚动），
+    # 其中 18 条挤在 top-50 排名里——若不排除，自动晋升被占位（50→32）。
+    # 候选池 = 无 override 的记忆；比例也以候选池为基数（GWT 语义：
+    # 「未被手动钉选的记忆中，salience 前 k 名进工作空间」）。
+    candidates = [m for m in active if not m.get("gating_override")]
+    n = len(candidates)
+    if n == 0:
+        return 0.0  # 全库皆钉选：极端边界，首条新记忆仍应可晋升
+    k = min(DEFAULT_CAP, max(1, round(n * _target_ratio(workspace))))
+    sals = sorted((compute_salience(m, workspace) for m in candidates), reverse=True)
+    return sals[k - 1]
+
+
+def get_threshold(workspace=None):
+    """
+    Read the promotion threshold for this workspace.
+
+    v3.11.2 (P0-L) 双模式：
+      1. 手动模式——meta 显式存了 gating_threshold（如 persona=0.35），
+         直接返回。适合需要「常驻」语义的小型身份库。
+      2. 自动模式（默认）——相对门控：阈值 = 当前库 salience 排名第 k 高值
+         （见 _dynamic_threshold）。库结构漂移免重标。
+    CLI `gating threshold --auto` 可清除手动值回到自动模式。
+
+    历史：v3.11.2 (P0-H) 修过 meta 值为 None 时靠 float(None) 异常兜底的
+    脆弱写法；P0-L 将 None 语义从「用全局默认常数」升级为「相对门控」。
+    """
+    try:
+        meta = read_meta(workspace)
+        raw = meta.get("gating_threshold")
+        if raw is not None:
+            return float(raw)
+    except Exception:
+        pass
+    return _dynamic_threshold(workspace)
 
 
 def set_threshold(value, workspace=None):
-    """Persist the promotion threshold for this workspace."""
-    v = float(value)
-    if not (0.0 <= v <= 1.0):
-        raise ValueError("threshold must be in [0, 1]")
-    update_meta("gating_threshold", v, workspace)
-    return v
+    """Persist the promotion threshold for this workspace (switches to manual mode).
+
+    v3.11.2 (P0-L): 传 None 清除手动值、回到相对门控自动模式
+    （CLI `gating threshold --auto`）。
+    """
+    with workspace_lock(workspace):
+        if value is None:
+            update_meta("gating_threshold", None, workspace)
+            return None
+        v = float(value)
+        if not (0.0 <= v <= 1.0):
+            raise ValueError("threshold must be in [0, 1]")
+        update_meta("gating_threshold", v, workspace)
+        return v
 
 
 # --- Core salience --------------------------------------------------------
@@ -214,6 +362,7 @@ def _cap_enforce(active, cap, workspace):
     return demoted
 
 
+@_write_locked
 def chain_ignite(workspace=None):
     """
     Paper's Ignition: if ANY node of a reasoning chain is promoted (by salience
@@ -258,6 +407,7 @@ def chain_ignite(workspace=None):
             "cap_demoted": cap_demoted}
 
 
+@_write_locked
 def get_active_workspace(workspace=None, cap=DEFAULT_CAP):
     """
     Return the promoted memories (the 'global workspace' analog).
@@ -278,13 +428,17 @@ def get_active_workspace(workspace=None, cap=DEFAULT_CAP):
     threshold = get_threshold(workspace)
 
     # v3.6.1: gating_override 优先（手动 promote/demote 不被 salience 重算覆盖）
+    # v3.11.2 (P0-I 审阅补遗)：无 override 的记忆双向重评。旧写法
+    # `elif not promoted` 只升不降——已带 flag 但 salience 跌破阈值的记忆
+    # 永远不会被重评（实测 persona 库 34 条全部冻死在 0.35 时代的 flag=True，
+    # 而按现阈值 0.70 无一达标）。标志必须诚实跟踪 salience。
     for m in active:
         ov = m.get("gating_override")
         if ov == "promote":
             m["workspace_promoted"] = True
         elif ov == "demote":
             m["workspace_promoted"] = False
-        elif not m.get("workspace_promoted", False):
+        else:
             m["workspace_promoted"] = compute_salience(m, workspace) >= threshold
 
     chain_promoted = set()
@@ -319,6 +473,7 @@ def get_active_workspace(workspace=None, cap=DEFAULT_CAP):
 
 
 # --- Manual override ------------------------------------------------------
+@_write_locked
 def promote(mem_id, workspace=None):
     """Force-promote a single memory into the workspace (manual override)."""
     memories = read_memories(workspace)
@@ -338,6 +493,7 @@ def promote(mem_id, workspace=None):
     return {"id": mem_id, "promoted": False, "reason": "not found or inactive"}
 
 
+@_write_locked
 def demote(mem_id, workspace=None):
     """Force-demote a single memory out of the workspace (manual override)."""
     memories = read_memories(workspace)
@@ -509,11 +665,15 @@ def calibrate(workspace=None, threshold=None):
     Report the promotion ratio at a given threshold. Use this to tune the
     threshold toward the GWT-aligned band (~8-25% of active memories promoted).
     """
+    # v3.11.2 (P0-L 审阅补遗)：口径统一为候选池（排除 gating_override 记忆），
+    # 与 _dynamic_threshold 排名语义一致。旧口径把 override 记入分子（实测
+    # 328 条历史 demote 中 18 条越阈值），calibrate 报的比例与实际 flag 数对不上。
     threshold = float(threshold) if threshold is not None else get_threshold(workspace)
     memories = read_memories(workspace)
     active = [m for m in memories if m.get("status") == "active"]
-    promoted = [m for m in active if compute_salience(m, workspace) >= threshold]
-    ratio = len(promoted) / max(len(active), 1)
+    candidates = [m for m in active if not m.get("gating_override")]
+    promoted = [m for m in candidates if compute_salience(m, workspace) >= threshold]
+    ratio = len(promoted) / max(len(candidates), 1)
 
     if ratio > 0.25:
         recommendation = "ratio too high (>25%): raise threshold to shrink the workspace"
@@ -524,6 +684,7 @@ def calibrate(workspace=None, threshold=None):
 
     return {
         "total_active": len(active),
+        "candidates": len(candidates),
         "promoted": len(promoted),
         "promotion_ratio": round(ratio, 3),
         "threshold": threshold,

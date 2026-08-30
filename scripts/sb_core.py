@@ -22,7 +22,7 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 )
 
 # v3.9.4: 单一版本号来源（修复 DEFAULT_CONFIG/三处兜底四处漂移的审阅 P1-4）
-VERSION = "3.11.1"
+VERSION = "3.12.0"
 
 # v3.9.5 P2-9: warmup 常量统一来源（消除 sb_reasoning/sb_entanglement 重复定义）
 WARMUP_MEMORY_THRESHOLD = 15
@@ -333,6 +333,101 @@ def write_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, path)  # 原子重命名
     return True
+
+
+# ─── 跨进程写锁（2026-08-30 并发安全修复）──────────────────────────────
+# 背景：DSH（鲸砚）/ WorkBuddy（砚）/ tdai-memory 三个客户端会同时写同一份
+# 超脑库。write_json 的原子写只保证文件不损坏，挡不住 read→modify→write
+# 序列的 lost update（后写者覆盖先写者的新增）。此锁提供 workspace 级互斥：
+#   - 跨进程：阻塞式文件锁（Windows msvcrt / POSIX fcntl）
+#   - 进程内：可重入（auto_store → add_memory 嵌套不死锁）
+# 锁的正确位置是「写事务函数」层（sb_memory.add_memory 等），不是 write_json 层
+# ——锁住写不锁读，防不了基于旧数据构造完整列表的竞态。
+
+import threading  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+
+try:
+    import msvcrt  # Windows
+    _HAS_MSVCRT = True
+except ImportError:  # POSIX
+    import fcntl
+    _HAS_MSVCRT = False
+
+_write_lock_depth = {}                # {ws_dir: depth} 进程内重入计数
+_write_lock_state_mutex = threading.Lock()
+
+
+def _acquire_os_lock(f):
+    """阻塞式锁定已打开的文件对象（自旋重试，兼容 msvcrt 无限阻塞语义）。"""
+    if _HAS_MSVCRT:
+        while True:
+            try:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                time.sleep(0.05)
+    else:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+
+def _release_os_lock(f):
+    if _HAS_MSVCRT:
+        try:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass  # 进程退出时 OS 自动释放；此处失败仅影响锁文件复用
+    else:
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def workspace_lock(workspace=None):
+    """workspace 级跨进程写锁（可重入）。
+
+    用法：在「读→改→写」完整事务的写函数外层包 with workspace_lock(ws): ...
+    锁文件：workspaces/<ws>/.write.lock（空文件，仅承载锁语义，不入备份）。
+    阻塞等待其他进程释放——写入操作都是重要语义，不设超时放弃。
+    注意：persona workspace 与 project workspace 是两把不同的锁，
+    单一命令内按固定顺序获取（project → persona）即无死锁风险。
+    """
+    ws_dir = get_workspace_dir(workspace)
+    # 注意：这里只用 get_workspace_dir + ensure_dir 解析路径并建目录，
+    # 不能调 ensure_workspace()——它会写 meta.json 等初始化文件，而此刻锁
+    # 尚未持有，多进程首写同一新 workspace 时 os.replace 会撞 WinError 5。
+    # meta/memories 的初始化留给事务函数内部的 read_memories（那时已持锁）。
+    ensure_dir(ws_dir)
+    key = str(ws_dir)
+
+    with _write_lock_state_mutex:
+        depth = _write_lock_depth.get(key, 0)
+    if depth > 0:
+        # 本进程已持有 → 可重入，仅增加计数
+        with _write_lock_state_mutex:
+            _write_lock_depth[key] = depth + 1
+        try:
+            yield
+        finally:
+            with _write_lock_state_mutex:
+                _write_lock_depth[key] -= 1
+        return
+
+    lock_path = os.path.join(ws_dir, ".write.lock")
+    f = open(lock_path, "a+")
+    try:
+        _acquire_os_lock(f)
+        with _write_lock_state_mutex:
+            _write_lock_depth[key] = 1
+        try:
+            yield
+        finally:
+            with _write_lock_state_mutex:
+                _write_lock_depth[key] = 0
+            _release_os_lock(f)
+    finally:
+        f.close()
 
 
 def read_memories(workspace=None):

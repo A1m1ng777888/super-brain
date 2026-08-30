@@ -30,13 +30,9 @@ CJK_BIGRAM_PATTERN = re.compile(r'[\u4e00-\u9fff]{2}')
 # v3.0.0: Default hash bits for ternary system
 DEFAULT_TERNARY_BITS = 64
 
-# v3.11: entity 精确命中 boost —— 查询 token 与记忆 entity 完全一致（大小写不敏感）
-# 时给 RRF 分数加固定 boost，修复「entity 强相关但 content 词面不重叠」的记忆
-# 排名过低被 limit 截断（实验 1 RAG 反例：查询 'RAG与记忆' 时 RAG 记忆 RRF≈0.058，
-# 排 51-57 名，被 limit=10/20 截断）。boost=0.04 使 RAG 记忆升至 top3。
-# 量纲依据：RRF 满分 6/(K+1)≈0.098，一个 rank1 信号贡献 1/61≈0.016；
-# entity 精确命中是强信号（记忆就是关于该实体），给 ~2.5 个 rank1 信号强度。
-ENTITY_HIT_BOOST = 0.04
+# v3.11: entity 精确命中 boost —— 常量的现行定义见下方「BM25 主分」区。
+# v3.11.2 P0-B 起检索改走 BM25，量纲从 RRF 的 0~0.098 变为归一化后的 0~1，
+# boost 相应由加性 +0.04 改为乘性 ×1.4（换算说明见 ENTITY_HIT_MULTIPLIER）。
 
 
 def tokenize(text):
@@ -369,12 +365,18 @@ def fuzzy_token_match(query_tokens, content_tokens, max_distance_ratio=0.33):
     if not query_tokens or not content_tokens:
         return 0.0
     
-    content_set = set(content_tokens)
+    # v3.11.2 P0-C: 有序去重，替代 set()。
+    # 实测缺陷：set 的迭代顺序取决于 Python 字符串哈希（PYTHONHASHSEED 每次
+    # 启动随机），配合下方 break，导致「哪个模糊匹配先命中」每次运行都不同
+    # → 检索结果不可复现。这与超脑「每个数字可自己复现」的定位直接冲突。
+    # dict.fromkeys 保持文档顺序去重，既确定性又不损失去重效果。
+    content_set = dict.fromkeys(content_tokens)
+    membership = content_set
     matched = 0
     total_boost = 0.0
     
     for qt in query_tokens:
-        if qt in content_set:
+        if qt in membership:
             matched += 1
             continue
         # Try fuzzy match for each unmatched query token
@@ -526,6 +528,203 @@ def keyword_match_score(query_tokens, content_tokens):
     return len(overlap) / len(query_set) if query_set else 0.0
 
 
+# ============================================================ BM25 主分
+
+# BM25 参数。与 superbrain-bench/eval_recall.py 的 BM25Baseline 保持逐项一致，
+# 便于评测器与线上代码互相复现（改这里必须同步改那里，否则对照失效）。
+BM25_K1 = 1.5
+
+# v3.11.2 P0-G（**已撤回，保留结论备查**）：曾试 0.75 → 0.90，最终撤回。
+#
+# 起因诊断（真实中文库，查询「腾讯那个岗位投出去后现在什么状态」）：
+#   top1 是我刚写入的 400 字过程记录，60.98 分，但**没有任何一个 token 贡献
+#   超过 7%**——「那个」7.0% +「什么」5.3% +「腾讯那」5.3% +「讯那个」5.3%…
+#   纯靠命中词多堆出来的；而真正相关的「腾讯AI产品经理岗已正式投递」只有
+#   15.43 分，构成却是「投出」33.2% +「腾讯」23.5%——高信息量的精准匹配。
+#   即：长文档靠**堆低信息量 token** 取胜，短而准的记忆被淹没。
+#
+# 中文 30 题扫描（同进程，recall@5 / mrr@5）：
+#     0.75  0.900 / 0.758   （保留值）
+#     0.85  0.867 / 0.756
+#     0.90  0.900 / 0.764
+#     0.95  0.867 / 0.756
+#     1.00  0.867 / 0.733
+#   0.90 在 k=1/3/5/10 上从不更差，k=10 多召回 1 题（0.900→0.933、
+#   mrr 0.740→0.771），看着该改。
+#
+# ❌ 但 LOCOMO（298 题，**10 倍样本**）给出一致反证：
+#     recall@5  0.570 → 0.557    recall@20  0.698 → 0.691    mrr 0.442 → 0.432
+#   三项指标全部为负。
+#
+# 撤回理由：中文侧的「收益」实为 **1 道题**（1/30 = 0.033），而反证是 298 题
+# 上约 4 道题的一致损失。1 道题不是证据，是抛硬币——**不在噪声上做决定**。
+#
+# 结论：B 只能按文档长度统一缩放，**无法区分「命中词多但都弱」与「命中词少
+# 但很强」**。堆量问题的根因在这里无解，需要别的手段（见报告 §18.4）。
+BM25_B = 0.75
+
+# v3.11: entity 精确命中 boost —— 查询 token 与记忆 entity 完全一致（大小写不敏感）
+# 时提升该记忆排名，修复「entity 强相关但 content 词面不重叠」的记忆
+# 排名过低被 limit 截断（实验 1 RAG 反例）。
+# v3.11.2 P0-B: 由「RRF 量纲下加性 +0.04」改为「原始分乘性 ×1.4」。
+# 换算依据：RRF 满分 6/(K+1)≈0.098，+0.04 ≈ 满分的 41%；乘性 ×1.4 保持
+# 相同的相对提升强度，且不会像加性那样在归一化后溢出 0~1 区间。
+ENTITY_HIT_MULTIPLIER = 1.4
+
+# v3.11.2: 动态阈值比例——保留「分数 ≥ 最佳匹配 × 该比例」的结果。
+# 不能沿用 v3.8.x 的等效值：RRF 分数分布平缓（每路最多贡献 1/61），而 BM25
+# 呈长尾（实测相关/最佳不相关分数比中位 3.09），同样的相对比例在 BM25 下
+# 会误滤掉大量中等相关记忆（test_v3.py 3c 实测：RAG 记忆被整体滤除）。
+# 该值由 superbrain-bench 实测标定（conv-26，199 题），扫描结果：
+#     thr   recall@5  recall@10  recall@20  ndcg@10  平均返回
+#     0.0      0.447      0.553      0.633    0.341     20.0
+#     0.2      0.447      0.553      0.633    0.341     19.8  ← 拐点
+#     0.3      0.447      0.548      0.613    0.341     18.3
+#     0.5      0.432      0.513      0.553    0.336     11.5
+# 0.2 及以下与「完全不过滤」指标逐位相同，0.3 起开始有可测量损失，
+# 0.5 会砍掉 42% 的候选并损失 8 个点的 recall@20。取 0.2：既保住全部
+# 召回质量，又保留对「查询与库完全无关」这一真实场景的兜底过滤。
+DYNAMIC_THRESHOLD_RATIO = 0.2
+
+# v3.11.2 P0-F: 单字 CJK token（unigram）的权重系数。
+# 1.0 = 与 bigram/trigram 同等计权（虚词噪声大）；0.0 = 完全不给分
+# （单字内容词如「茶」彻底失配）。0.35 由 30 条真实中文问句三选一同进程
+# 对照标定，详见 _bm25_tokenize 的 docstring。
+CJK_UNIGRAM_WEIGHT = 0.35
+
+
+def _bm25_tokenize(text):
+    """BM25 专用分词：CJK 出 unigram + bigram + trigram，其中 unigram 降权。
+
+    ⚠️ 为什么要有第二个分词函数，而不是直接改全局 tokenize()——因为
+    **全局 tokenize() 不能动**：sb_memory.add_memory 在写入时算
+    `simhash(full_text)` 并落盘，find_duplicates 再拿新算的值去比已存储的
+    旧值。改了分词，新旧 simhash 就不可比，去重会**静默失效**（不报错、
+    只是再也查不出重复）。要改全局分词必须先做全量 simhash 重算迁移。
+
+    ------------------------------------------------------------------
+    为什么 CJK unigram 要「降权保留」而不是「全留」或「全删」
+    ------------------------------------------------------------------
+    同一份证据会以 unigram / bigram / trigram 三种 token 重复计入，
+    但 unigram 也是**单字内容词唯一的匹配通道**，不能一删了之。
+
+    实测（真实中文库，查询「我们数据库用的什么」top-1 得分 40.29，
+    内容词「数据库」贡献 0，100% 来自停用词）：
+        我们 18.5% | 们 17.6% | 什么 17.2% | 什 17.2% | 么 15.1% | 我 12.3%
+    更反直觉的是这些填充词 IDF **极高**（我们 = 4.150，538 篇里仅 8 篇含）。
+    BM25 隐含假设「停用词必然高频低 IDF」，但个人知识库是密集笔记，
+    口语填充词反而罕见 → 被当成强信号。
+
+    但全部删掉 unigram 也有代价：查询「上次说的那个茶是什么来着」的
+    bigram 是 `个茶`/`茶是`，文档「砚：记住了，乌龙茶」的 bigram 是
+    `乌龙`/`龙茶`——**只有单字「茶」能匹配**，删了就彻底失配。
+
+    三选一同进程对照（30 条真实中文问句，recall@1/@3/@5、mrr@5）：
+        unigram 全留(×1.0)  0.667 / 0.833 / 0.833 / 0.728   ← mrr 最低
+        unigram 全删(×0.0)  0.600 / 0.867 / 0.867 / 0.756   ← recall@1 最低
+        unigram ×0.35       0.633 / 0.867 / **0.900** / **0.758**  ← 采用
+        unigram ×0.2        0.633 / 0.867 / 0.867 / 0.756
+    ×0.35 在四项指标上均为最佳或并列最佳，且从不是最差。
+
+    降权实现：在 _build_bm25_index 里把单字 CJK token 的 idf 乘以
+    CJK_UNIGRAM_WEIGHT。因为 BM25 单项贡献 = idf × tf 饱和项，缩放 idf
+    即等价于缩放该项贡献，且查询侧与文档侧共用同一张 idf 表，自动一致。
+    """
+    if not text:
+        return []
+    tokens = list(WORD_PATTERN.findall(text.lower()))
+    cjk_chars = CJK_PATTERN.findall(text)
+    # bigram
+    for i in range(len(cjk_chars) - 1):
+        tokens.append(cjk_chars[i] + cjk_chars[i + 1])
+    # trigram
+    for i in range(len(cjk_chars) - 2):
+        tokens.append(cjk_chars[i] + cjk_chars[i + 1] + cjk_chars[i + 2])
+    # unigram：保留（单字内容词的唯一匹配通道），权重在 idf 层降权
+    tokens.extend(cjk_chars)
+    return tokens
+
+
+def _is_cjk_unigram(tok):
+    """是否为单字 CJK token（用于 idf 降权）。"""
+    return len(tok) == 1 and bool(CJK_PATTERN.fullmatch(tok))
+
+
+def _build_bm25_index(memories):
+    """预建 BM25 索引：idf 表 + 倒排表 + 文档长度。
+
+    倒排（term -> [(doc_idx, tf)]）的意义：查询时只遍历真正命中该 term 的
+    文档，避免「每个 query token 全库扫一遍」的 O(queries × n) 开销。
+
+    v3.11.2 P0-B: 检索主分由 TF-IDF cosine 换成 BM25。
+    实测依据（LOCOMO conv-26/30/41，448 题，见 superbrain-bench/results）：
+        朴素 BM25 单路   recall@5 0.447 / 0.533 / 0.513
+        六通道 RRF（旧） recall@5 0.293 / 0.314 / 0.269
+        simhash 单路             0.027 / 0.048 / 0.031
+        ternary 单路             0.040 / 0.067 / 0.026
+    RRF 的病灶在于融合「名次」而非「分数」：simhash / ternary 单路表现与
+    随机基线（约 1.2%）无异，却各自对全库贡献一整遍 1/(60+rank) 的扰动，
+    量级与有效信号的名次级差相当 → 三路噪声压过了两路信号。
+    """
+    # v3.11.2 P0-F: BM25 走专用分词（去 CJK unigram），其余模块仍用全局
+    # tokenize()——原因见 _bm25_tokenize 的 docstring（simhash 兼容性约束）。
+    docs = [_bm25_tokenize(f"{m.get('entity', '')} {m.get('content', '')}")
+            for m in memories]
+    n = len(docs)
+    avgdl = (sum(len(d) for d in docs) / n) if n else 0.0
+    tf_list = [Counter(d) for d in docs]
+
+    df = Counter()
+    for tf in tf_list:
+        for t in tf:                     # Counter 的键已去重
+            df[t] += 1
+    idf = {t: math.log(1 + (n - c + 0.5) / (c + 0.5)) for t, c in df.items()}
+
+    # v3.11.2 P0-F: 单字 CJK token 降权。BM25 单项贡献 = idf × tf 饱和项，
+    # 缩放 idf 即等价于缩放该 token 的贡献；查询侧与文档侧共用同一张 idf
+    # 表，因此自动一致。依据见 CJK_UNIGRAM_WEIGHT 与 _bm25_tokenize。
+    if CJK_UNIGRAM_WEIGHT != 1.0:
+        for t in idf:
+            if _is_cjk_unigram(t):
+                idf[t] *= CJK_UNIGRAM_WEIGHT
+
+    postings = defaultdict(list)
+    for i, tf in enumerate(tf_list):
+        for t, f in tf.items():
+            postings[t].append((i, f))
+
+    return {
+        "n": n,
+        "avgdl": avgdl,
+        "idf": idf,
+        "postings": postings,
+        "lens": [len(d) for d in docs],
+    }
+
+
+def _bm25_scores(query_tokens, index):
+    """返回与 memories 顺序一致的 BM25 分数列表（无过滤、无截断、无归一化）。"""
+    n = index["n"]
+    out = [0.0] * n
+    avgdl = index["avgdl"]
+    if not avgdl:
+        return out
+    idf = index["idf"]
+    postings = index["postings"]
+    lens = index["lens"]
+    k1 = BM25_K1
+    for t in query_tokens:
+        plist = postings.get(t)
+        if not plist:
+            continue
+        w = idf[t]
+        for i, f in plist:
+            dl = lens[i]
+            out[i] += w * (f * (k1 + 1)) / (
+                f + k1 * (1 - BM25_B + BM25_B * dl / avgdl))
+    return out
+
+
 def _signal_relevant(tfidf, kw, sh, th, fuzzy, expanded):
     """粗筛：任一路信号达到最低相关阈值即视为候选。
 
@@ -539,27 +738,31 @@ def _signal_relevant(tfidf, kw, sh, th, fuzzy, expanded):
 def search_memories(query, memories, limit=10, similarity_threshold=0.15,
                     dynamic_threshold=True, workspace=None):
     """
-    Search memories using a hybrid approach:
-    1. SimHash for fast candidate filtering
-    2. TF-IDF cosine similarity for precise ranking
-    3. Keyword matching for exact hit boosting
-    4. v3.0.0: Ternary hash for enhanced semantic discrimination
-    5. v3.0.0: Fuzzy token matching for typo tolerance
-    6. v3.0.0: Word network query expansion
+    Search memories. v3.11.2 (P0-B) 起主分是 **BM25 单路**，不再做多通道融合。
 
-    v2.1.0: Dynamic threshold mode — instead of a fixed similarity_threshold,
-    the quality line adapts to the distribution of scores:
-      dynamic_min = max(base, min(ceiling, top_score * ratio))
-    This ensures high-quality queries get a commensurately high bar,
-    while niche queries aren't starved of results.
+    算法沿革（保留以备对照，勿删）：
+    - v3.0.0 – v3.7：六路信号手调权重加权求和
+    - v3.8.x – v3.11.1：六路信号 RRF（Reciprocal Rank Fusion）按名次融合
+    - v3.11.2：BM25 单路。原因见 _build_bm25_index 的实测数据——RRF 融合
+      的是名次而非分数，三路无效信号（simhash / ternary / fuzzy）各自对全库
+      贡献一整遍 1/(60+rank) 扰动，把两路有效信号淹没了。
+      六通道 RRF recall@5 = 0.29，朴素 BM25 = 0.52。
+
+    分数语义（重要）：返回的是**归一化到 0~1 的相对分**——占本次检索最高分
+    的比例，只保证同一查询内可比。它是排序分，不是相似度：
+    - 需要「绝对相似度」的调用方（例如判断新内容是否与已有记忆雷同）
+      请用 tf_idf_cosine_similarity，不要用这里的 score。
+    - 现存的反例教训：v3.8.x 把打分换成 RRF（上限 0.098）后没有同步下游的
+      硬编码阈值，导致 sb_perception.novelty_check 里 `score < 0.6` 恒成立、
+      新颍性检测彻底失效。量纲变了，阈值必须跟着变。
 
     Args:
         query: Search query string
         memories: List of memory dicts
         limit: Max results to return
-        similarity_threshold: Fallback fixed threshold (used when dynamic_threshold=False)
-        dynamic_threshold: If True, compute threshold adaptively from score distribution
-        workspace: v3.0.0 workspace name for word network access
+        similarity_threshold: 固定阈值，0~1 相对量纲（dynamic_threshold=False 时用）
+        dynamic_threshold: True 时保留分数达到最佳匹配 50% 以上的结果
+        workspace: workspace 名（v3.11.2 起检索路径不再使用词网络，仅为兼容保留）
 
     Returns:
         List of (memory, score, match_type) tuples, sorted by score descending
@@ -568,91 +771,36 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
         return []
 
     query_tokens = tokenize(query)
-    query_simhash = simhash(query)
-    query_ternary = ternary_hash(query)  # v3.0.0
     # v3.11: 预计算查询 token 的小写集合，供 entity 精确命中判断（大小写不敏感）
     query_lower_tokens = {t.lower() for t in query_tokens}
+    # v3.0.0: Word network query expansion（已于 v3.11.2 P0-B 退出检索路径）
+    # v3.11.2 P0-B: 检索主分改 BM25 后，词网络不再参与排序。
+    # 依据：按题型拆解 448 题后，BM25+wordnet 两路相对 BM25 单路在
+    # adversarial(-0.046)、multi-hop(-0.024) 上是净亏，其余题型差异都在
+    # 噪声底(±0.01)内——没有任何一类题型上词网络有显著正向贡献。
+    # 注：P0-A 修复的「CLI 路径词网络恒为空」是真实缺陷，对仍走词网络的
+    # 纠缠场挖掘（sb_entangle_mine）等路径依旧有效，这里只是不再在检索
+    # 热路径上付构建开销。
 
-    # v3.0.0: Word network query expansion
-    expanded_tokens = set(query_tokens)
-    base_token_count = len(expanded_tokens)          # 去重后基数，用于判断"扩展是否真发生"（修复 v3.8.3 的 set-vs-list 误判）
-    wn = get_word_network(workspace)
-    if wn._total_docs > 0:
-        expansions = wn.expand_query(query, max_expansions=3, min_similarity=0.12)
-        for exp_token, _ in expansions:
-            expanded_tokens.add(exp_token)
-    has_expansion = len(expanded_tokens) > base_token_count   # set-vs-set：仅在确有新 token 加入时才点亮第六路信号
-
-    # Build corpus for TF-IDF
+    # Build corpus（keyword 标注仍需要 content 分词）
     all_docs = [tokenize(m.get("content", "")) for m in memories]
 
-    # v3.9.4: 预建 IDF 文档频率表——消除热路径 O(n²·terms) 退化。
-    # 原实现每条候选记忆都在 tf_idf_cosine_similarity 内对每个 term 全库扫
-    # doc_freq（n=500 实测 ~21s/query）；预建一次后查询只查表。
-    # doc_freq 语义（每文档对 term 至多计 1）与原实现逐项等价。
-    n_docs = len(all_docs)
-    doc_freq = Counter()
-    for _toks in all_docs:
-        for _term in set(_toks):
-            doc_freq[_term] += 1
-    query_tf = Counter(query_tokens)
+    # v3.11.2 P0-B: BM25 主分 + 单路排序（替代六通道 RRF）。
+    # v3.11.2 P0-F: 查询侧同样走 _bm25_tokenize，与索引侧分词保持一致——
+    # 两侧分词口径不同会让倒排表查不到（索引里没有 unigram 键）。
+    bm_index = _build_bm25_index(memories)
+    bm_raw = _bm25_scores(_bm25_tokenize(query), bm_index)
 
     candidates_raw = []
     for i, memory in enumerate(memories):
-        content = memory.get("content", "")
-        entity = memory.get("entity", "")
-        full_text = f"{entity} {content}"
-        content_tokens = all_docs[i]
-
-        # 1. SimHash similarity (fast, coarse)
-        mem_simhash = memory.get("simhash", 0)
-        if mem_simhash == 0:
-            mem_simhash = simhash(full_text)
-        sh_score = simhash_similarity(query_simhash, mem_simhash)
-
-        # 2. TF-IDF cosine similarity (precise) — v3.9.4: 预建 doc_freq 查表。
-        # 注意 tf2 仍对 full_text（含 entity）现场 tokenize，与原实现保持一致
-        # （all_docs/doc_freq 只含 content，边界 CJK bigram 行为不变）。
-        tfidf_score = _tfidf_cosine_precomputed(
-            query_tf, Counter(tokenize(full_text)), doc_freq, n_docs)
-
-        # 3. Keyword match (with v3.0.0 expanded tokens)
-        kw_score = keyword_match_score(query_tokens, content_tokens)
-
-        # v3.0.0: 4. Ternary hash similarity (enhanced discrimination)
-        mem_ternary = memory.get("ternary_hash")
-        if mem_ternary is None:
-            mem_ternary = ternary_hash(full_text)
-        th_score = ternary_similarity(query_ternary, mem_ternary)
-
-        # v3.0.0: 5. Fuzzy token match (typo tolerance)
-        fuzzy_score = fuzzy_token_match(query_tokens, content_tokens)
-
-        # v3.0.0: 6. Expanded token match (word network)
-        expanded_score = keyword_match_score(list(expanded_tokens), content_tokens) if has_expansion else 0
-
-        # v3.8.x: 收割 TencentDB-Agent-Memory 的 RRF 秩融合范式。
-        # 不再用 6 路手调权重求和，改为收集信号、循环结束后按名次融合（见下方 RRF）。
-        # 粗筛：任一路信号达到最低相关阈值才进候选（等价于原 combined>=0.02 的"跳过垃圾"）。
-        if not _signal_relevant(tfidf_score, kw_score, sh_score, th_score, fuzzy_score, expanded_score):
+        bm = bm_raw[i]
+        if bm <= 0:
             continue
-
-        # Determine match type（与原逻辑一致）
-        if fuzzy_score > 0.3 and kw_score < 0.3:
-            match_type = "fuzzy"  # v3.0.0: typo-tolerant match
-        elif kw_score > 0.5:
-            match_type = "keyword"
-        elif tfidf_score > 0.3:
-            match_type = "semantic"
-        elif th_score > 0.3:
-            match_type = "ternary"  # v3.0.0: ternary hash match
-        elif expanded_score > 0.3:
-            match_type = "expanded"  # v3.0.0: word network expansion
-        else:
-            match_type = "fuzzy"
-
-        candidates_raw.append((memory, match_type,
-                              (tfidf_score, kw_score, sh_score, th_score, fuzzy_score, expanded_score)))
+        # keyword 只用于 match_type 标注，不参与排序：消融显示它单路
+        # recall@5 仅 0.30，作为融合信号有害，作为标注仍有解释价值。
+        kw_score = keyword_match_score(query_tokens, all_docs[i])
+        match_type = "keyword" if kw_score > 0.5 else "semantic"
+        candidates_raw.append((memory, match_type, bm))
 
     if not candidates_raw:
         return []
@@ -663,46 +811,49 @@ def search_memories(query, memories, limit=10, similarity_threshold=0.15,
     # 注意：boost 只在「过滤后排序」阶段生效，不参与 dynamic_threshold 计算——
     # 否则会抬高 top_score → 抬高 dynamic_min → 误滤掉其他中等相关记忆。
     entity_hit_flags = []
-    for mem, _mt, _scores in candidates_raw:
+    for mem, _mt, _bm in candidates_raw:
         ent = (mem.get("entity") or "").strip().lower()
         entity_hit_flags.append(bool(ent) and ent in query_lower_tokens)
 
-    # v3.8.x: RRF 融合（Reciprocal Rank Fusion），分数 = Σ 1/(K+rank)，K=60。
-    # 6 路信号各自排序取名次，按名次融合——免调权、免归一化，比手调权重更稳。
-    K = 60
-    n = len(candidates_raw)
-    rrf_scores = [0.0] * n
-    for s in range(6):
-        order = sorted(range(n), key=lambda i: candidates_raw[i][2][s], reverse=True)
-        rank = 1
-        prev_val = None
-        for pos, i in enumerate(order):
-            val = candidates_raw[i][2][s]
-            if prev_val is not None and val != prev_val:
-                rank = pos + 1
-            rrf_scores[i] += 1.0 / (K + rank)
-            prev_val = val
-
-    # 原始 RRF 分数（不含 boost），供 dynamic_threshold 计算——避免 boost 污染阈值线
-    base_candidates = [
-        (candidates_raw[i][0], rrf_scores[i], candidates_raw[i][1])
-        for i in range(n)
+    # v3.11.2 P0-B: 归一化到 0~1。
+    # 为什么必须归一化：BM25 是随查询长度累加的**无界量**（本库实测中位约 67、
+    # p90 约 101），而下游 sb_memory 的过期惩罚(×0.85)、遗忘降权，以及 persona
+    # 合并的 min(1.0, score * 1.1) 全部假设 0~1 量纲——直接放出原始分会让所有
+    # persona 结果被 clamp 成 1.0 集体插队。
+    #
+    # 归一方式：占本次检索最高分的比例，语义为「相对最佳匹配有多好」。
+    # 与旧 RRF 时代的相对强度对齐：旧阈值 0.02~0.07 / 满分 0.098 ≈ 最高分的
+    # 20%~71%；新动态阈值取最高分的 50%，落在同一区间内。
+    #
+    # ⚠️ 这是**相对**量纲：同一查询内可比，跨查询绝对值不可比。需要绝对
+    #   相似度的调用方（如感知层新颍性判定）请用 tf_idf_cosine_similarity，
+    #   见 sb_perception.novelty_check 的 v3.11.2 修复。
+    top_base = max(c[2] for c in candidates_raw)
+    if top_base <= 0:
+        return []
+    boosted_raw = [
+        c[2] * (ENTITY_HIT_MULTIPLIER if entity_hit_flags[i] else 1.0)
+        for i, c in enumerate(candidates_raw)
     ]
+    top_boosted = max(boosted_raw)
 
-    # 动态阈值（RRF 量纲：满分 6/(K+1)≈0.098，典型相关 ≈0.05~0.09）
+    # 过滤用 base_norm（不含 boost）：boost 若参与阈值计算会抬高最高分 →
+    # 抬高阈值线 → 误滤掉其他中等相关记忆（v3.11 原有约束，保持不变）。
+    base_norm = [c[2] / top_base for c in candidates_raw]
+    norm = [r / top_boosted for r in boosted_raw]
+
     if dynamic_threshold:
-        top_score = max(c[1] for c in base_candidates)
-        dynamic_min = max(0.02, min(0.07, top_score * 0.5))
-        effective_threshold = dynamic_min
+        # 归一化后最高分恒为 1.0，动态阈值即「保留达到最佳匹配
+        # DYNAMIC_THRESHOLD_RATIO 以上者」。比例值见常量处的标定说明。
+        effective_threshold = DYNAMIC_THRESHOLD_RATIO
     else:
-        # 非动态模式：把原 weighted-sum 量纲的阈值夹到 RRF 量纲范围内
-        effective_threshold = min(similarity_threshold, 0.07)
+        # 非动态模式：similarity_threshold 现与归一化量纲一致，无需再夹取。
+        effective_threshold = max(0.0, min(1.0, similarity_threshold))
 
-    # Filter，然后在结果上叠加 entity boost 并排序（boost 只影响排序，不影响过滤）
     results = [
-        (m, s + (ENTITY_HIT_BOOST if entity_hit_flags[i] else 0.0), t)
-        for i, (m, s, t) in enumerate(base_candidates)
-        if s >= effective_threshold
+        (candidates_raw[i][0], norm[i], candidates_raw[i][1])
+        for i in range(len(candidates_raw))
+        if base_norm[i] >= effective_threshold
     ]
     results.sort(key=lambda x: x[1], reverse=True)
     return results[:limit]

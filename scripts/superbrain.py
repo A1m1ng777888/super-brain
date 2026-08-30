@@ -192,10 +192,15 @@ def cmd_memory_add(args):
         valid_from=args.valid_from,      # v2.1.0
         valid_until=args.valid_until,    # v2.1.0
         replaces=args.replaces,          # v2.1.0
-        persona=getattr(args, 'persona', False)  # v3.8.0
+        persona=getattr(args, 'persona', False),   # v3.8.0
+        dedupe=getattr(args, 'dedupe', False)      # v3.11.2
     )
     layer = "persona" if getattr(args, 'persona', False) else "project"
-    print(f"Memory added [{layer}]: {memory['id']}")
+    # v3.11.2: 幂等写入命中时说清楚是复用，别让调用方误以为是新增
+    if memory.get("_dedupe_hit"):
+        print(f"Memory NOT added [{layer}] — 复用已有记忆: {memory['id']}")
+    else:
+        print(f"Memory added [{layer}]: {memory['id']}")
     print_json(memory)
 
 
@@ -330,10 +335,14 @@ def cmd_gating_demote(args):
 
 
 def cmd_gating_threshold(args):
-    """Get or set the promotion salience threshold (0-1)."""
-    if args.value is not None:
+    """Get or set the promotion salience threshold (0-1).
+    v3.11.2 (P0-L): --auto 清除手动值回到相对门控自动模式。"""
+    if getattr(args, "auto", False):
+        set_threshold(None, workspace=args.workspace)
+        print(f"Threshold cleared for workspace '{args.workspace or 'default'}' — relative gating (auto mode).")
+    elif args.value is not None:
         set_threshold(args.value, workspace=args.workspace)
-        print(f"Threshold set to {args.value} for workspace '{args.workspace or 'default'}'.")
+        print(f"Threshold set to {args.value} for workspace '{args.workspace or 'default'}' (manual mode).")
     else:
         t = get_threshold(workspace=args.workspace)
         print(f"Current threshold: {t}")
@@ -526,6 +535,19 @@ def cmd_graph_delete(args):
     else:
         print(f"Node not found: {args.name}")
         sys.exit(1)
+
+
+def cmd_graph_build(args):
+    """v3.11.2 (P0-I): 从 active 记忆自动构建图谱并回填 related_nodes。"""
+    import sb_graph
+    kwargs = {}
+    if args.floor is not None:
+        kwargs["floor"] = args.floor
+    if args.top is not None:
+        kwargs["top_k"] = args.top
+    result = sb_graph.build_from_memories(workspace=getattr(args, "workspace", None),
+                                          dry_run=args.dry_run, **kwargs)
+    print_json(result)
 
 
 def cmd_graph_stats(args):
@@ -1340,6 +1362,9 @@ def build_parser():
     sp.add_argument("--replaces", help="Memory ID this one supersedes (v2.1.0)")
     sp.add_argument("--persona", action="store_true",
                     help="v3.8.0: 写入 persona workspace（常驻身份层）而非 project workspace")
+    sp.add_argument("--dedupe", action="store_true",
+                    help="v3.11.2: 幂等写入——已存在高度相似记忆(simhash>=0.95)"
+                         "时跳过新增，直接返回那条。默认关闭以保持既有行为")
     sp.add_argument("--force", action="store_true",
                     help="v3.7.1: 跳过「先检索后入库」硬步骤校验（会写审计，仅用于自动化/明确豁免）")
     sp.set_defaults(func=cmd_memory_add)
@@ -1439,6 +1464,16 @@ def build_parser():
     sp = graph_sub.add_parser("delete", help="Delete a graph node")
     sp.add_argument("--name", required=True, help="Node name or ID")
     sp.set_defaults(func=cmd_graph_delete)
+
+    # graph build (v3.11.2 P0-I: 从记忆自动建图)
+    sp = graph_sub.add_parser("build", help="Auto-build graph from memory entities")
+    sp.add_argument("--floor", type=float, default=None,
+                    help="Min edge similarity (default: sb_graph.GRAPH_BUILD_FLOOR=0.05)")
+    sp.add_argument("--top", type=int, default=None,
+                    help="Top-K neighbors per entity (default: sb_graph.GRAPH_BUILD_TOP_K=3)")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="Compute stats without writing graph.json/memories.json")
+    sp.set_defaults(func=cmd_graph_build)
 
     # graph stats
     sp = graph_sub.add_parser("stats", help="Show graph statistics")
@@ -1750,7 +1785,9 @@ def build_parser():
     sp.set_defaults(func=cmd_gating_demote)
 
     sp = gating_sub.add_parser("threshold", help="Get/set promotion salience threshold")
-    sp.add_argument("--value", type=float, help="New threshold in [0, 1]")
+    sp.add_argument("--value", type=float, help="New threshold in [0, 1] (switches to manual mode)")
+    sp.add_argument("--auto", action="store_true",
+                    help="Clear manual threshold, switch to relative gating (auto mode)")
     sp.add_argument("--workspace", help="Workspace name")
     sp.set_defaults(func=cmd_gating_threshold)
 

@@ -110,13 +110,51 @@ def _is_exempt(mem: dict) -> bool:
     return False
 
 
-def _decay_factor(mem: dict) -> float:
-    """记忆级衰减因子：从未访问 > 近期访问过 > 正常。"""
+def access_tracking_cutoff_ts(memories: list[dict]):
+    """访问统计停止工作的时点，返回该时点前最后一条有访问记录的记忆时间戳。
+
+    v3.11.2: 修一个「把信号缺失当成信号本身」的缺陷。
+
+    背景：v3.9.5 P2-11 起 `sb_memory.search()` 的 `update_access_stats`
+    默认关闭（「读路径不带写副作用」），且全仓库无调用方传 True，
+    于是**该版本之后创建的记忆，access_count 永远不可能是非零**。
+
+    实测（2026-08-30，548 条 active）：
+
+    | 创建月份 | 有访问记录 | 总数 | 占比 |
+    |---|---|---|---|
+    | 2026-06 | 21  | 26  | 81% |
+    | 2026-07 | 146 | 204 | 72% |
+    | 2026-08 | 0   | 318 | **0%** |
+
+    即访问统计在 2026-08 前某个时点停止。原实现不加区分地把
+    `access_count == 0` 一律判为「从未被访问」→ `DECAY_NEVER_ACCESSED(2.0)`，
+    导致**最新鲜的记忆反而被当作最容易遗忘的**：昨天创建的记忆拿到最高档
+    衰减，6 月的老记忆因为有历史访问记录而只拿正常档。
+
+    ⚠️ 我第一版把问题写成「全库 access_count 恒为 0」——**那是错的**，
+    实测 30.5% 的记忆有访问记录。真正的形态是「按时点断裂」，不是「全库失效」。
+    """
+    ts = [m.get("timestamp") for m in memories
+          if int(m.get("access_count") or 0) > 0 and m.get("timestamp")]
+    return max(ts) if ts else None
+
+
+def _decay_factor(mem: dict, tracking_cutoff=None) -> float:
+    """记忆级衰减因子：从未访问 > 近期访问过 > 正常。
+
+    `tracking_cutoff` 为访问统计停止工作的时点（见 access_tracking_cutoff_ts）。
+    创建于该时点**之后**的记忆，其 `access_count == 0` 不代表「从未被访问」，
+    只代表「信号缺失」——此时退化为中性值 DECAY_NORMAL，避免让最新鲜的
+    记忆背上最重的衰减。
+    """
     if _is_exempt(mem):
         return 0.0
     access_count = int(mem.get("access_count") or 0)
     if access_count == 0:
-        return DECAY_NEVER_ACCESSED
+        if tracking_cutoff and (mem.get("timestamp") or "") > tracking_cutoff:
+            return DECAY_NORMAL          # 信号缺失，不可判定
+        return DECAY_NEVER_ACCESSED      # 可被统计期间内确未访问
     last_days = _days_since(mem.get("last_accessed"))
     if last_days is not None and last_days <= 30:
         return DECAY_RECENTLY_ACCESSED
@@ -210,11 +248,15 @@ def forgetting_weight(tier: str) -> float:
     return 1.0
 
 
-def compute_forget_priority(mem: dict, project_stats: dict) -> float:
+def compute_forget_priority(mem: dict, project_stats: dict,
+                            tracking_cutoff=None) -> float:
     """
     计算单条记忆的遗忘优先级 (0.0–1.0)。
     forget_priority = S(项目规模占比) × (1 - A(项目活跃度)) × D(记忆衰减因子)
     豁免记忆 → 0.0（永不遗忘）。
+
+    v3.11.2: 新增 `tracking_cutoff`，透传给 _decay_factor。
+    访问统计停止后创建的记忆不再被误判为「从未被访问」。
     """
     if _is_exempt(mem):
         return 0.0
@@ -224,7 +266,7 @@ def compute_forget_priority(mem: dict, project_stats: dict) -> float:
         return 0.0
     S = stat["count"] / max(stat.get("total", 1), 1)
     A = stat["activity"]
-    D = _decay_factor(mem)
+    D = _decay_factor(mem, tracking_cutoff)
     return round(min(1.0, S * (1 - A) * D), 4)
 
 
@@ -286,6 +328,9 @@ def scan_forgetting(memories: list[dict]) -> dict:
     """
     active = [m for m in memories if m.get("status") == "active"]
     stats = compute_project_stats(active)
+    # v3.11.2: 算出访问统计停止的时点，透传给优先级计算。
+    # 该时点之后创建的记忆，access_count=0 不再被当作「从未被访问」。
+    cutoff = access_tracking_cutoff_ts(active)
     dormant_candidates = []
     warm_high_risk = []
     for m in active:
@@ -293,7 +338,7 @@ def scan_forgetting(memories: list[dict]) -> dict:
         stat = stats.get(p)
         if not stat:
             continue
-        priority = compute_forget_priority(m, stats)
+        priority = compute_forget_priority(m, stats, cutoff)
         if priority <= 0:
             continue
         item = {
@@ -309,11 +354,28 @@ def scan_forgetting(memories: list[dict]) -> dict:
             warm_high_risk.append(item)
     dormant_candidates.sort(key=lambda x: -x["priority"])
     warm_high_risk.sort(key=lambda x: -x["priority"])
-    return {
+    result = {
         "stats": stats,
         "dormant_candidates": dormant_candidates,
         "warm_high_risk": warm_high_risk,
     }
+    # v3.11.2: 把访问统计的断裂时点暴露给调用方与状态报告——
+    # 该时点之后创建的记忆无法判定「是否被访问过」，衰减已退化为中性值，
+    # 这份数字的口径必须让使用者知道。
+    if cutoff:
+        untrackable = sum(1 for m in active
+                          if (m.get("timestamp") or "") > cutoff)
+        result["access_tracking"] = {
+            "cutoff_ts": cutoff,
+            "untrackable_count": untrackable,
+            "untrackable_ratio": round(untrackable / max(len(active), 1), 4),
+            "reason": "该时点之后创建的记忆 access_count 恒为 0"
+                      "（update_access_stats 默认关闭），衰减因子已退化为"
+                      " DECAY_NORMAL，不再套用 DECAY_NEVER_ACCESSED。",
+        }
+    else:
+        result["access_tracking"] = {"cutoff_ts": None, "untrackable_count": 0}
+    return result
 
 
 def apply_forgetting(memories: list[dict]) -> dict:

@@ -59,9 +59,21 @@ def novelty_check(text, workspace=None, threshold=0.6):
             "similar_count": 0
         }
     
+    # v3.11.2 P0-D: 新颍性判定必须用**绝对相似度**，不能用检索排序分。
+    #
+    # 实测缺陷：拿一条记忆的原文去查它自己（必然完全匹配），v3.11.1 返回
+    #   best_match_score=0.116 / is_novel=True / similar_count=0
+    # 根因：v3.8.x 把检索打分从加权和换成 RRF（上限 6/61≈0.098），却没同步
+    # 本函数里 0.6 / 0.8 / 0.3 这三个硬编码阈值，于是 `best_score < 0.6`
+    # 恒成立 → 任何输入都被判「新颍」。这是 gating_flood（110 条被自动晋升、
+    # 远超 cap 50）的上游成因之一。
+    #
+    # 注意 v3.11.2 的 P0-B 只是把量纲从 RRF 换成「占最高分的比例」，
+    # 最高分恒为 1.0 —— 不变这里的写法就会从「恒判新颍」翻成「恒判已知」，
+    # 同样是失效。所以必须改用真正的相似度函数，而不是继续调阈值。
     results = search_memories(text, active, limit=5, dynamic_threshold=False,
                               similarity_threshold=0.1, workspace=workspace)
-    
+
     if not results:
         return {
             "is_novel": True,
@@ -69,9 +81,24 @@ def novelty_check(text, workspace=None, threshold=0.6):
             "best_match_id": None,
             "similar_count": 0
         }
-    
-    best_mem, best_score, _ = results[0]
-    similar_count = sum(1 for _, s, _ in results if s >= 0.3)
+
+    # 候选仍由 BM25 挑出（召回质量最好），相似度一律改用
+    # tf_idf_cosine_similarity —— 天然落在 0~1，与本文件的阈值语义一致。
+    # 该函数此前已在文件头 import 却从未被调用（死 import），此处接回原设计。
+    #
+    # 关于不传 all_docs（IDF 全为 1，退化为纯 TF cosine）：
+    # 这里问的是「两条具体文本像不像」，不是「这条文本在库里有多罕见」。
+    # 库级 IDF 会把「记忆」「项目」这类领域高频词的正常重合误判为不相似。
+    # 附带收益是复杂度与库规模无关（O(词数) 而非 O(库 × 词数)）——
+    # gating 对每条待入库内容都要调本函数，O(n²) 不可接受。
+    scored = []
+    for mem, _sort_score, _match_type in results:
+        full = f"{mem.get('entity', '')} {mem.get('content', '')}"
+        scored.append((mem, tf_idf_cosine_similarity(text, full)))
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    best_mem, best_score = scored[0]
+    similar_count = sum(1 for _, s in scored if s >= 0.3)
     
     return {
         "is_novel": best_score < threshold,

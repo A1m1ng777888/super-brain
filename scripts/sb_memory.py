@@ -11,6 +11,7 @@ Author: A1m1ng777888
 import sys
 import os
 import re
+import functools
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -19,7 +20,8 @@ from sb_core import (
     generate_id, get_timestamp, read_memories, write_memories,
     read_graph, write_graph, update_meta, print_json, print_table,
     ensure_workspace, load_config, read_json, write_json, get_workspace_dir,
-    read_persona_memories, write_persona_memories, get_persona_workspace_dir
+    read_persona_memories, write_persona_memories, get_persona_workspace_dir,
+    workspace_lock
 )
 from sb_search import (
     simhash, search_memories, find_duplicates,
@@ -27,9 +29,25 @@ from sb_search import (
     tokenize
 )
 # v3.6.1: 接入 GWT 门控层（冷存储/活跃工作空间两层）。sb_gating 仅依赖 sb_core，无反向 import，单向安全。
-from sb_gating import compute_salience, is_promoted, _audit_log
+from sb_gating import compute_salience, is_promoted, _audit_log, _cap_enforce, DEFAULT_CAP
 # v1.0.0: 遗忘治理（实验 1 结论落地：软切降权，不降级检索算法）
 from sb_forgetting import compute_project_stats, get_memory_weight
+
+
+def _write_locked(func):
+    """写事务装饰器：把整个 read→modify→write 序列包进跨进程 workspace 锁。
+
+    2026-08-30 并发安全修复：DSH / WorkBuddy / tdai-memory 三客户端并发写同一份库时，
+    原子写只防文件损坏，防不了 lost update。锁必须覆盖完整事务（读→改→写），
+    因此挂在事务函数层而非 write_json 层。锁进程内可重入（auto_store→add_memory
+    嵌套安全）。要求 workspace 以 kwargs 传递（现有全部调用方均如此）。
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        ws = kwargs.get("workspace")
+        with workspace_lock(ws):
+            return func(*args, **kwargs)
+    return wrapper
 
 
 # Memory types
@@ -47,6 +65,11 @@ TYPE_DEFAULTS = {
     "reasoning_intermediate": {"scope": "session", "category": "reasoning"}
 }
 
+# v3.11.2: 幂等写入的相似度阈值（仅 add_memory(dedupe=True) 时生效）。
+# 标定依据见 add_memory 的 docstring：真实重复对 sim=1.0000，
+# 随机基线 max=0.719 → 0.95 有 0.23 安全余量。不要下调到 0.85。
+DEDUPE_SIMHASH_THRESHOLD = 0.95
+
 # v3.7: provenance labels — Karpathy "召唤的幽灵" 落地
 # 在 get_context 输出中标注每条记忆的可信度来源
 PROVENANCE_LABELS = {
@@ -55,6 +78,12 @@ PROVENANCE_LABELS = {
     "reasoning_step": "🔗推理步骤",
     "unknown": "❓未标注"
 }
+
+# v3.11.2 P0-E: persona（常驻身份层）相对 project 层的排序加成。
+# 语义是「**相关**的身份记忆优先」，不是「身份记忆无条件优先」——
+# 后者正是 P0-E 要修的缺陷（实测 persona 独占 60% 的 top-5 槽位）。
+# 加成必须与 project 层共享同一归一化基准才成立，见 search() 内的合并检索。
+PERSONA_BOOST = 1.1
 
 
 def compute_provenance(mem):
@@ -85,15 +114,29 @@ def compute_provenance(mem):
         return ("unknown", "system_inference", 1.0)       # 低置信度，不调整数字但标来源
 
 
+@_write_locked
 def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
                source=None, attributes=None, tags=None, workspace=None,
                valid_from=None, valid_until=None, replaces=None,
-               persona=False):
+               persona=False, dedupe=False):
     """
     Add a new memory to the store.
-    
+
     v3.8.0: persona=True 时写入 persona workspace（常驻身份层）而非 project workspace。
     用于存储砚的身份记忆（偏好/决策/身份/跨项目事实），不随 cwd 切换。
+
+    v3.11.2: dedupe=True 时开启**幂等写入**——若库中已存在高度相似
+    （simhash 相似度 >= DEDUPE_SIMHASH_THRESHOLD）的 active 记忆，
+    则**不新增**，直接返回那条已有记忆（并附 `_dedupe_hit` 标记）。
+    默认 False，保持既有行为不变。
+
+    为什么要做成可选而不是默认开启：
+    下方已有的冲突检测是「只告警不阻断」（v3.8.7 注释：短字符串 SimHash
+    偏高，误伤面大）。实测（2026-08-30）给了量化依据：随机 300 对记忆的
+    simhash 相似度中位 0.516 / p90 0.594 / **max 0.719**，而真实重复对的
+    sim = 1.0000。即阈值取 0.95 时，相对随机基线有 **0.23 的安全余量**；
+    但取 0.85 时，在约 15 万对的全量空间里尾部可能触及。
+    所以：0.95 足够安全，但仍属**行为变更**，默认关闭，由调用方显式开启。
     
     Temporal parameters (v2.1.0):
         valid_from: ISO date string (e.g. "2023-01-01") — when this fact became true
@@ -132,6 +175,29 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
     full_text = f"{entity or ''} {content}"
     sh = simhash(full_text, config.get("simhash_bits", 64))
     th = ternary_hash(full_text, config.get("simhash_bits", 64))
+
+    # --- v3.11.2: 幂等写入（可选）---
+    # 与下方「只告警不阻断」的冲突检测不同，这里会**真的不写入**。
+    # 放在写入边界做防御，胜过事后靠审计清理（实测重复率 0.7%，
+    # 但它是个会持续累积的问题）。
+    if dedupe:
+        try:
+            from sb_search import simhash_similarity as _sh_sim
+            for _ex in memories:
+                if _ex.get("status") != "active":
+                    continue
+                if (_ex.get("entity") or "general").lower() != (
+                        entity or "general").lower():
+                    continue
+                if _sh_sim(sh, _ex.get("simhash") or 0) >= DEDUPE_SIMHASH_THRESHOLD:
+                    print(f"  ⓘ 幂等写入：已存在高度相似记忆 {_ex['id']}"
+                          f"（simhash >= {DEDUPE_SIMHASH_THRESHOLD}），跳过新增。")
+                    # 不修改原对象：加下划线前缀的副本字段，避免污染落盘数据
+                    hit = dict(_ex)
+                    hit["_dedupe_hit"] = True
+                    return hit
+        except (ImportError, TypeError, ValueError) as e:
+            print(f"  ⚠ 幂等写入检查跳过：{e}")
 
     # --- Temporal: handle replaces (v2.1.0) ---
     if replaces:
@@ -249,6 +315,24 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
                    {}, {"workspace_promoted": False},
                    reversible=False, workspace=effective_ws)
 
+    # v3.11.2 (P0-H，编号顺延：P0-E persona / P0-F CJK 已占用): 写入路径事件驱动的容量执行。
+    # 架构错位（2026-08-30 定位）：治理逻辑（_cap_enforce 降级）此前只挂在
+    # 查询路径（get_active_workspace / chain_ignite），而 selfcheck 的
+    # gating_flood_protection 直读存储里的 workspace_promoted 标志——只要
+    # 不走查询路径，超容状态永不纠正，selfcheck 持续 CRITICAL（实测 137>50）。
+    # add_memory 是全部入库入口（memory add / auto_store / longterm ingest
+    # 的单点），在此直接执行容量约束，洪水保护不再依赖调用方自律。
+    # 注意 _cap_enforce 只改内存不落盘，需在此重写。
+    if memory.get("workspace_promoted"):
+        active_after = [m for m in memories if m.get("status") == "active"]
+        demoted = _cap_enforce(active_after, DEFAULT_CAP, effective_ws)
+        if demoted:
+            # 新记忆自身也可能被降级（salience 排不进 top-cap），落盘前同步标志
+            if persona:
+                write_persona_memories(memories)
+            else:
+                write_memories(memories, workspace)
+
     return memory
 
 
@@ -288,6 +372,7 @@ def list_memories(mem_type=None, entity=None, status="active", limit=50,
     return filtered[:limit]
 
 
+@_write_locked
 def update_memory(mem_id, content=None, confidence=None, status=None,
                   attributes=None, workspace=None,
                   valid_from=None, valid_until=None):
@@ -328,6 +413,7 @@ def update_memory(mem_id, content=None, confidence=None, status=None,
     return updated
 
 
+@_write_locked
 def delete_memory(mem_id, workspace=None):
     """Delete a memory by ID. Returns True if deleted."""
     memories = read_memories(workspace)
@@ -352,6 +438,7 @@ def delete_memory(mem_id, workspace=None):
     return False
 
 
+@_write_locked
 def merge_memories(id1, id2, workspace=None):
     """
     Merge two memories. The higher-confidence memory absorbs the lower one.
@@ -426,7 +513,29 @@ def search(query, limit=10, workspace=None, update_access_stats=False):
     config = load_config()
     threshold = config.get("similarity_threshold", 0.15) * 0.3  # Lower threshold for search
 
-    results = search_memories(query, active, limit=limit, similarity_threshold=threshold,
+    # v3.11.2 P0-E: persona 层必须与 project 层在**同一量纲**下竞争。
+    #
+    # 旧写法对 persona 单独调一次 search_memories，而该函数每次调用都在自己
+    # 内部归一化（top 恒为 1.0），于是 persona 的最佳匹配恒等于 1.0，再 ×1.1
+    # 被 clamp 回 1.0 —— **无论多不相关都能压过 project 层全部结果**（project
+    # 层分数还在上一步被过期惩罚与遗忘降权乘过，必然 < 1.0）。
+    #
+    # 实测（superbrain-bench/eval_real_queries.py，16 条真实中文问句）：
+    #   persona 独占 60% 的 top-5 槽位，recall@5 从 0.938 掉到 0.625、mrr
+    #   从 0.692 掉到 0.424。极端例子「上次说的那个茶是什么来着」5/5 全是
+    #   身份记忆，答案（乌龙茶）被彻底埋掉。
+    #
+    # 与 P0-D 同属「量纲污染」：归一化发生在错误的边界上，破坏了跨集合可比性。
+    #
+    # 修法：两层合并成**一次**检索 → 单次归一化 → 共享同一个最高分。×1.1 的
+    # 语义随之恢复为「相关的身份记忆优先」，而不再是「身份记忆无条件优先」。
+    persona_memories = read_persona_memories() or []
+    persona_active = [m for m in persona_memories if m.get("status") == "active"]
+    persona_ids = {m["id"] for m in persona_active}
+    # workspace 本身可能就是 persona 层，去重后再合并，避免同一条被计两次
+    pool = [m for m in active if m["id"] not in persona_ids] + persona_active
+
+    results = search_memories(query, pool, limit=limit, similarity_threshold=threshold,
                               workspace=workspace)
 
     # v2.1.0: time-aware score penalty for expired facts
@@ -453,13 +562,26 @@ def search(query, limit=10, workspace=None, update_access_stats=False):
     # 实验 1 结论：不降级检索算法（中文禁退回标签匹配），只对 dormant/warm 项目记忆
     # 的召回分数打折。dormant=0.5 / warm=0.8 / active=1.0；pinned/身份类永远 1.0。
     # 项目活跃度基于 active 记忆统计（read_memories 已过滤），与 gating 层同源。
-    if scored_results and active:
+    # 注：条件只判 scored_results 非空，不再要求 active 非空——
+    # 否则 project 层为空时 persona 结果会漏掉标记与加成。
+    if scored_results:
         try:
             fg_stats = compute_project_stats(active)
-            scored_results = [
-                (mem, score * get_memory_weight(mem, fg_stats), match_type)
-                for mem, score, match_type in scored_results
-            ]
+
+            # v3.11.2 P0-E: persona 层在此处套用自己的系数，与 project 层的遗忘
+            # 降权**并列**而非叠加——两层已在同一次检索里共享同一最高分，这里
+            # 只决定各自的附加系数。
+            #  - project：遗忘档位降权（dormant 0.5 / warm 0.8 / active 1.0）
+            #  - persona：×1.1 常驻身份层优先，clamp 在 1.0 以内（保持对外
+            #    承诺的 0~1 量纲，get_context 的 min_score 过滤依赖它）
+            def _layer_weight(mem, score, match_type):
+                if mem["id"] in persona_ids:
+                    return (mem, min(1.0, score * PERSONA_BOOST),
+                            f"persona_{match_type}")
+                return (mem, score * get_memory_weight(mem, fg_stats), match_type)
+
+            scored_results = [_layer_weight(mem, score, match_type)
+                              for mem, score, match_type in scored_results]
             scored_results.sort(key=lambda x: x[1], reverse=True)
         except Exception:
             pass  # 遗忘治理是软指标，任何异常不阻塞检索主流程
@@ -475,23 +597,8 @@ def search(query, limit=10, workspace=None, update_access_stats=False):
                 m["last_accessed"] = now_ts
         write_memories(memories, workspace)
 
-    # v3.8.0: 双层召回——合并 persona workspace（常驻身份层）
-    # persona 记忆给 ×1.1 boost（身份层优先），去重后合并
-    persona_memories = read_persona_memories()
-    if persona_memories:
-        persona_active = [m for m in persona_memories if m.get("status") == "active"]
-        if persona_active:
-            persona_results = search_memories(query, persona_active, limit=limit,
-                                               similarity_threshold=threshold,
-                                               workspace="persona")
-            existing_ids = {r[0]["id"] for r in scored_results}
-            for mem, score, match_type in persona_results:
-                if mem["id"] not in existing_ids:
-                    # persona 层 boost: ×1.1，但不超过 1.0
-                    boosted_score = min(1.0, score * 1.1)
-                    scored_results.append((mem, boosted_score, f"persona_{match_type}"))
-                    existing_ids.add(mem["id"])
-            scored_results.sort(key=lambda x: x[1], reverse=True)
+    # v3.11.2 P0-E: persona 层的合并已上移到检索前（合并成一次检索以共享量纲）
+    # 与遗忘降权处（套用 PERSONA_BOOST 系数）。此处不再有独立的 persona 检索。
 
     return scored_results[:limit]
 
@@ -865,6 +972,7 @@ def simhash_similarity(h1, h2):
     return 1.0 - (distance / 64.0)
 
 
+@_write_locked
 def increment_memory_counter(mem_id, workspace=None):
     """
     Increment access/repetition counter on an existing memory.
@@ -1014,6 +1122,7 @@ def fuzzy_correct_query(query, workspace=None):
 # v3.0.0: Expression Learning (学习用户表达习惯)
 # ===================================================================
 
+@_write_locked
 def learn_expression(user_input, standard_form=None, workspace=None):
     """
     Learn a user's expression pattern.
