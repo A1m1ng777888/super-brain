@@ -382,7 +382,14 @@ def api_toggle(component_id, enabled):
         rc, out = _run_sm("install", "--task", component_id)
     else:
         rc, out = _run_sm("uninstall", "--task", component_id)
-    return {"ok": rc == 0, "action": "install" if enabled else "uninstall",
+    if rc == 0:
+        return {"ok": True, "action": "install" if enabled else "uninstall",
+                "detail": out.strip()[:400], "state": api_state()}
+    # 失败必须带 error（前端契约：ok=false 即走失败分支，revert 开关视觉）
+    what = "开启" if enabled else "关闭"
+    return {"ok": False, "action": "install" if enabled else "uninstall",
+            "error": what + "失败，自动任务没有" + ("装上" if enabled else "卸干净")
+                     + "。" + (out.strip()[-160:] or ""),
             "detail": out.strip()[:400], "state": api_state()}
 
 
@@ -677,6 +684,20 @@ def api_board(payload):
         j = idx + step
         if 0 <= j < len(ps):
             ps[idx], ps[j] = ps[j], ps[idx]
+    elif action == "update_task":
+        # 行内编辑任务：标题/截止日/所属项目均可改（due 传空字符串=清除）
+        t = next((x for x in b["tasks"] if x.get("id") == payload.get("id")), None)
+        if not t:
+            return {"ok": False, "error": "任务不存在"}
+        if "title" in payload:
+            title = str(payload.get("title") or "").strip()[:120]
+            if not title:
+                return {"ok": False, "error": "任务内容不能为空"}
+            t["title"] = title
+        if "due" in payload:
+            t["due"] = _norm_due(payload.get("due"))
+        if "project" in payload:
+            t["project"] = str(payload.get("project") or "").strip()[:60]
     elif action == "toggle_pin":
         p = next((x for x in b["projects"] if x.get("id") == payload.get("id")), None)
         if not p:
@@ -755,7 +776,8 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         # 256KB：看板导入恢复（R2）的 JSON 体积可达数十 KB；仅本机回环可达
         if length > 262144:
-            self._send_json({"ok": False, "error": "payload too large"}, 413)
+            self._send_json({"ok": False, "error": "文件太大（超过 256KB 上限），"
+                             "请检查是否选错了文件"}, 413)
             return
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
@@ -957,6 +979,27 @@ if(t==="dark")document.documentElement.dataset.theme="dark";})();
   .badge.规划中 { background:var(--warm-gray); color:var(--ink2); border-color:var(--line); }
   .badge.暂停   { background:var(--warm-gray); color:var(--ink3); border-color:var(--line); }
   .badge.已完成 { background:rgba(29,158,117,.10); color:#177a58; border-color:rgba(29,158,117,.22); }
+  /* 遗留任务（项目已删）的所属项目徽章：中性色，不用项目名当类名（非法 CSS 类） */
+  .badge.badge-proj { background:var(--warm-gray); color:var(--ink2);
+                      border-color:var(--line); }
+
+  /* 错误常驻横幅（toast 2.4s 会消失，错误必须可见可重试） */
+  .errbar { position:fixed; top:0; left:0; right:0; z-index:1000;
+            background:var(--err); color:#fff; font-size:12.5px;
+            padding:9px 16px; display:flex; gap:12px; align-items:center;
+            justify-content:center; flex-wrap:wrap;
+            box-shadow:0 4px 16px rgba(0,0,0,.25); }
+  .errbar button { background:rgba(255,255,255,.16); border-color:transparent;
+                   color:#fff; padding:4px 12px; font-size:12px; }
+  .errbar button:hover { background:rgba(255,255,255,.28); color:#fff;
+                         border-color:transparent; }
+
+  /* 任务行内编辑表单（P1：任务创建后可改标题/截止日/所属项目） */
+  .task.editing { align-items:center; flex-wrap:wrap; }
+  .tedit { display:flex; gap:6px; flex-wrap:wrap; flex:1 1 100%;
+           align-items:center; }
+  .tedit .binput { flex:1 1 160px; font-size:13px; padding:6px 10px; }
+  .tedit .binput.short { flex:0 1 130px; }
 
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
          margin-right:6px; vertical-align:1px; flex:none; }
@@ -998,7 +1041,12 @@ if(t==="dark")document.documentElement.dataset.theme="dark";})();
          text-transform:uppercase; color:var(--ink3); }
 
   .switch { position:relative; width:44px; height:24px; flex:none; cursor:pointer; }
-  .switch input { display:none; }
+  /* visually-hidden 替代 display:none：保留 Tab 聚焦（键盘可达），视觉仍由 slider 呈现 */
+  .switch input { position:absolute; opacity:0; width:1px; height:1px;
+                  margin:0; pointer-events:none; }
+  .switch input:focus-visible + .slider { outline:2px solid var(--amber);
+                  outline-offset:2px; }
+  body.toggling .slider { opacity:.55; pointer-events:none; }  /* 安装期 pending */
   .slider { position:absolute; inset:0; background:#d9d3c2; border-radius:12px;
             transition:background .25s; }
   .slider::after { content:""; position:absolute; width:18px; height:18px; border-radius:50%;
@@ -1107,6 +1155,9 @@ if(t==="dark")document.documentElement.dataset.theme="dark";})();
                  justify-content:space-between; align-items:center !important; }
     .proj-tools { margin-left:0; width:100%; justify-content:flex-start; }
     button, a.btn { padding:11px 16px; font-size:14px; min-height:44px; }
+    /* 移动端触控目标：小图标钮也必须达到 44×44（Apple HIG 最低标准） */
+    .iconbtn { width:44px; min-width:44px; height:44px; padding:0;
+               display:inline-flex; align-items:center; justify-content:center; }
     h1 { font-size:24px; }
     .pulse { gap:16px; padding:14px 16px; }
     .pulse .heat { margin-left:0; max-width:none; width:100%; }
@@ -1119,6 +1170,7 @@ if(t==="dark")document.documentElement.dataset.theme="dark";})();
 </style>
 </head>
 <body>
+<div id="errbar" class="errbar" style="display:none" role="alert"></div>
 <div class="wrap">
   <div class="kicker">Super Brain · Workbench</div>
   <h1>超脑工作台<small>记忆库管家 · 127.0.0.1:__PORT__</small></h1>
@@ -1169,12 +1221,25 @@ if(t==="dark")document.documentElement.dataset.theme="dark";})();
 "use strict";
 let STATE = null;
 let RUNNING = false;          // 体检进行中：横幅转运行态、全部按钮禁用
+let TOGGLING = false;         // 开关安装/卸载进行中：防并发点击
 let DECIDE_OPEN = false;
 let CONFIRMING = false;       // 整理建议二次确认态
 let EXPANDED = new Set();     // 展开任务清单的项目 id
 let EDIT_ID = null;           // 正在编辑 note 的项目 id
+let EDIT_TASK_ID = null;      // 正在行内编辑的任务 id
+let GRAPH_STALE = false;      // 体检后图谱快照已过期（提醒重新生成）
 
 const $ = id => document.getElementById(id);
+
+// ---------------- 错误常驻横幅：toast 2.4s 会消失，错误必须可见/可重试 ----------------
+function showError(msg, retryable) {
+  const el = $("errbar");
+  el.innerHTML = '<span>' + esc(msg) + '</span>'
+    + (retryable ? '<button onclick="hideError();load()">重试</button>' : "")
+    + '<button onclick="hideError()" aria-label="关闭错误提示" title="关闭">×</button>';
+  el.style.display = "flex";
+}
+function hideError() { const el = $("errbar"); if (el) el.style.display = "none"; }
 
 // ---------------- 主题（R3 暗色模式）：localStorage 记忆，首次跟随系统 ----------------
 const THEME_KEY = "wb_workbench_theme";
@@ -1260,8 +1325,12 @@ async function load() {
   try {
     const r = await fetch("/api/state");
     STATE = await r.json();
+    hideError();
     refreshAll();
-  } catch (e) { toast("面板连接失败：" + e.message); }
+  } catch (e) {
+    // 失联必须持续可见：toast 一闪即逝不够，用常驻横幅 + 重试
+    showError("面板连接失败，页面数据可能已过期。", true);
+  }
 }
 
 // 统一刷新入口（铁律：渲染函数之间禁止互调，全部经由此处调度）
@@ -1279,7 +1348,7 @@ function refreshAll() {
 // 「对话即上板」实时同步：轻量轮询 board（无子进程，5s），有变化只刷看板区。
 // 编辑/确认/输入聚焦时跳过本轮应用，不打断操作。
 async function pollBoard() {
-  if (CONFIRMING || EDIT_ID || RUNNING) return;
+  if (CONFIRMING || EDIT_ID || RUNNING || EDIT_TASK_ID) return;
   const box = $("board");
   if (document.activeElement && box.contains(document.activeElement)) return;
   try {
@@ -1333,22 +1402,26 @@ async function refreshGraph(btn) {
     const r = await fetch("/api/dashboard/refresh", { method: "POST" });
     const res = await r.json();
     if (res.ok) {
+      GRAPH_STALE = false;   // 快照已重新生成，过期提示清除
       await load();   // 刷新 STATE（含 dashboard.mtime），renderGraphBar 随 refreshAll 更新
       $("graph-frame").src = "/dashboard?embed=1&t=" + Date.now();  // 强制重载快照
       GRAPH_LOADED = true;
       toast("数据已更新");
     } else {
-      toast("生成失败：" + esc(res.detail || res.error || ""));
+      showError("图谱数据生成失败：" + esc(res.detail || res.error || ""), true);
     }
-  } catch (e) { toast("刷新失败：" + e.message); }
+  } catch (e) { showError("刷新失败：" + e.message, true); }
   if (btn) btn.disabled = false;
 }
 function renderGraphBar() {
   const el = $("graph-meta");
   if (!el) return;
   const dm = STATE && STATE.dashboard && STATE.dashboard.mtime;   // null 防护：?tab=graph 直达时数据未到
-  el.textContent = "数据快照（只读统计）"
-    + (dm ? " · 生成于 " + dm : " · 进入本页时自动生成");
+  el.innerHTML = "数据快照（只读统计）"
+    + (dm ? " · 生成于 " + esc(dm) : " · 进入本页时自动生成")
+    + (GRAPH_STALE
+        ? ' · <b style="color:var(--amber-deep)">体检后有更新，建议点「重新生成数据」</b>'
+        : "");
 }
 // R4：iframe 高度自适应 —— /dashboard 与宿主同源（本服务托管），直接量内容高度，
 // 看板随宿主页面自然滚动（移动端无嵌套滚动陷阱）；量不到时保持 CSS 78vh 内滚兜底。
@@ -1381,7 +1454,8 @@ function renderHero() {
 
   if (RUNNING) {
     el.innerHTML = kicker + '<div class="hero-title">' + dot("run") + '正在体检…</div>'
-      + '<div class="hero-meta">构建知识图谱 + 健康自检，约 10-30 秒，请勿关闭页面</div>';
+      + '<div class="hero-meta">构建知识图谱 + 健康自检，约 10-30 秒。体检在后台运行，'
+      + '关掉页面也会完成——只是这次的结果提示收不到。</div>';
     return;
   }
   if (!h.status || h.status === "never_ran") {
@@ -1557,7 +1631,7 @@ function renderDecide() {
         + '引擎会先自动备份，所有改动都能在审计记录中追溯。'
         + '<div class="btnrow" style="margin-top:10px">'
         + '<button class="danger" id="btn-apply" onclick="doApply()">确认应用</button>'
-        + '<button onclick="cancelApply()">先不应用</button></div></div>';
+        + '<button id="btn-cancel" onclick="cancelApply()">先不应用</button></div></div>';
     }
   }
   el.className = "card";
@@ -1585,12 +1659,31 @@ function dueMeta(due) {
 }
 function taskRow(t, inProject) {
   const m = t.done ? null : dueMeta(t.due);
+  // 行内编辑态：标题/截止日/所属项目三字段（P1：任务创建后可改，不再只能删了重建）
+  if (EDIT_TASK_ID === t.id) {
+    const opts = ['<option value="">（随手任务 · 不挂项目）</option>']
+      .concat((((STATE.board || {}).projects) || []).map(p =>
+        '<option value="' + esc(p.name) + '"'
+        + (p.name === t.project ? " selected" : "") + '>' + esc(p.name)
+        + '</option>')).join("");
+    return '<div class="task editing"><div class="tedit">'
+      + '<input class="binput" id="et-title" maxlength="120" value="'
+      + esc(t.title) + '" placeholder="任务内容">'
+      + '<input class="binput short" id="et-due" type="date" value="'
+      + esc(t.due || "") + '" title="截止日期（可清空）">'
+      + '<select class="binput short" id="et-proj" title="所属项目">' + opts
+      + '</select>'
+      + '<button onclick="saveTask(\'' + t.id + '\')">保存</button>'
+      + '<button onclick="cancelTaskEdit()">取消</button></div></div>';
+  }
   return '<div class="task' + (t.done ? " done" : "") + '">'
     + '<input type="checkbox" ' + (t.done ? "checked" : "")
     + ' onchange="toggleTask(\'' + t.id + '\')">'
-    + '<span class="t-title">' + esc(t.title) + '</span>'
-    + (inProject ? "" : (t.project ? '<span class="badge ' + esc(t.project)
-        + '" style="pointer-events:none">' + esc(t.project) + '</span>' : ""))
+    + '<span class="t-title" title="点击编辑任务（内容/截止日/所属项目）"'
+    + ' style="cursor:pointer" onclick="editTask(\'' + t.id + '\')">'
+    + esc(t.title) + '</span>'
+    + (inProject ? "" : (t.project ? '<span class="badge badge-proj" title="所属项目（原项目已删除）">'
+        + esc(t.project) + '</span>' : ""))
     + (m ? '<span class="t-due ' + m.cls + '">' + m.text + '</span>'
          : (t.due ? '<span class="t-due">' + esc(t.due.slice(5)) + '</span>' : ""))
     + '<button class="iconbtn" title="删除任务" onclick="delTask(\'' + t.id
@@ -1626,7 +1719,7 @@ function renderBoard() {
     const myDoneN = done.filter(t => t.project === p.name).length;
     const myAll = myOpen.length + myDoneN;
     const isOpen = EXPANDED.has(p.id);
-    // 工具钮组只留管理动作（置顶/排序/删除），展开改由点击整行触发
+    // 工具钮组只留管理动作（置顶/排序/编辑现状/删除），展开改由点击整行触发
     const tools =
         '<button class="iconbtn' + (p.pinned ? " pin-on" : "") + '" title="'
         + (p.pinned ? "取消置顶" : "置顶") + '" onclick="event.stopPropagation();togglePin(\''
@@ -1637,6 +1730,9 @@ function renderBoard() {
       + '<button class="iconbtn" title="下移" ' + (idx === total - 1 ? "disabled" : "")
         + ' onclick="event.stopPropagation();moveProject(\'' + p.id + '\',\'down\')">'
         + SVG_DOWN + '</button>'
+      + '<button class="iconbtn" title="编辑项目现状（✎）" '
+        + ' onclick="event.stopPropagation();startEdit(\'' + p.id + '\')">'
+        + SVG_EDIT + '</button>'
       + '<button class="iconbtn" title="删除项目" onclick="event.stopPropagation();delProject(\''
         + p.id + '\')">' + SVG_X + '</button>';
     let body =
@@ -1734,7 +1830,9 @@ function cancelEdit() { EDIT_ID = null; renderBoard(); }
 function saveNote(id) {
   const v = ($("ed-note").value || "").trim();
   boardAct({ action: "update_project", id: id, note: v }).then(ok => {
-    if (ok) { EDIT_ID = null; toast("现状已更新"); }
+    // boardAct 内部的 refreshAll 跑在 EDIT_ID 清空之前（渲染的是编辑框），
+    // 这里清掉后必须再渲染一次，否则页面停在编辑态
+    if (ok) { EDIT_ID = null; renderBoard(); toast("现状已更新"); }
   });
 }
 function cycleStatus(id, cur) {
@@ -1744,9 +1842,40 @@ function cycleStatus(id, cur) {
 }
 function togglePin(id) { boardAct({ action: "toggle_pin", id: id }); }
 function moveProject(id, dir) { boardAct({ action: "move_project", id: id, dir: dir }); }
-function delProject(id) { boardAct({ action: "del_project", id: id }); }
+function delProject(id) {
+  const p = (((STATE.board || {}).projects) || []).find(x => x.id === id);
+  if (!p) return;
+  const nTasks = ((((STATE.board || {}).tasks) || []))
+    .filter(t => t.project === p.name && !t.done).length;
+  // 告知任务去向（删除项目不删任务，open 任务会移到随手区）+ 明示不可撤销
+  const msg = "删除项目「" + p.name + "」？"
+    + (nTasks ? "\n该项目下 " + nTasks + " 个未完成任务会保留，移入「随手任务」。"
+              : "")
+    + "\n此操作不可撤销。确定删除？";
+  if (!confirm(msg)) return;
+  boardAct({ action: "del_project", id: id });
+}
 function toggleTask(id) { boardAct({ action: "toggle_task", id: id }); }
-function delTask(id) { boardAct({ action: "del_task", id: id }); }
+function delTask(id) {
+  const t = (((STATE.board || {}).tasks) || []).find(x => x.id === id);
+  if (t && !confirm("删除任务「" + t.title + "」？\n此操作不可撤销。")) return;
+  boardAct({ action: "del_task", id: id });
+}
+// ---------------- 任务行内编辑（P1：任务创建后可改，不再只能删了重建） ----------------
+function editTask(id) { EDIT_TASK_ID = id; renderBoard(); }
+function cancelTaskEdit() { EDIT_TASK_ID = null; renderBoard(); }
+function saveTask(id) {
+  const title = ($("et-title").value || "").trim();
+  if (!title) { toast("任务内容不能为空"); return; }
+  const due = $("et-due").value || "";
+  const proj = $("et-proj").value || "";
+  boardAct({ action: "update_task", id: id, title: title, due: due,
+             project: proj }).then(ok => {
+    // 同 saveNote：先清 EDIT_TASK_ID 再渲染一次，退出编辑态
+    if (ok) { EDIT_TASK_ID = null; renderBoard(); toast("任务已更新"); }
+  });
+}
+
 function addTaskTo(pid) {
   const input = $("pt-" + pid);
   const title = (input && input.value || "").trim();
@@ -1785,25 +1914,49 @@ async function runNow() {
       body: JSON.stringify({ component_id: id }) });
     const res = await r.json();
     STATE = res.state || STATE;
-    if (res.ok) toast("体检完成");
-    else toast("体检没跑完（" + esc(res.error || ("退出码 " + res.exit_code)) + "）");
-  } catch (e) { toast("体检失败：" + e.message); }
+    if (res.ok) {
+      // 体检完成 → 图谱快照已落后于最新状态，提示用户重新生成（不自动跑，
+      // 避免体检子进程刚结束又排队一个 dashboard 子进程）
+      GRAPH_STALE = true;
+      renderGraphBar();
+      toast("体检完成");
+      hideError();
+    } else {
+      // 人话 + 出路：退出码对 C 端无意义，给重试和「交给 AI」两条路
+      showError("体检没跑完（" + esc(res.error || ("退出码 " + res.exit_code))
+        + "）。可以重试；若反复失败，可把体检结果交给 AI 深入检查。", true);
+    }
+  } catch (e) { showError("体检失败：" + e.message, true); }
   RUNNING = false; refreshAll();
 }
 async function toggle(id, on) {
+  if (TOGGLING) return;          // 安装/卸载进行中：锁住防并发写竞态
+  TOGGLING = true;
+  document.body.classList.add("toggling");   // pending 视觉：slider 半透明
   toast(on ? "正在开启（安装每日自动任务）…" : "正在关闭（卸载每日任务）…");
   try {
     const r = await fetch("/api/toggle", { method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ component_id: id, enabled: on }) });
     const res = await r.json();
-    if (res.ok === false && res.error) { toast(res.error); load(); return; }
+    if (res.ok === false) {
+      // 失败：后端现在必带 error；load() 回读真实状态 → 开关视觉自动 revert
+      showError(res.error || "操作失败，开关状态已还原。", false);
+      load();
+      return;
+    }
     STATE = res.state || STATE; refreshAll();
+    hideError();
     toast(on ? "已开启，明早开始自动体检" : "已关闭");
-  } catch (e) { toast("操作失败：" + e.message); load(); }
+  } catch (e) { showError("操作失败：" + e.message, true); load(); }
+  finally { TOGGLING = false; document.body.classList.remove("toggling"); }
 }
 async function doApply() {
+  // 两段式修复：应用进行中两个按钮都必须锁死——「先不应用」在请求在飞时
+  // 是假取消（fetch 继续飞照常落盘），宁可禁用也不能给用户错误暗示
   const b = $("btn-apply"); if (b) b.disabled = true;
+  const c = $("btn-cancel");
+  if (c) { c.disabled = true; c.textContent = "应用中…"; }
   toast("正在应用（会先自动备份）…");
   try {
     const r = await fetch("/api/consolidate/apply", { method: "POST" });
@@ -1815,7 +1968,11 @@ async function doApply() {
     CONFIRMING = false; DECIDE_OPEN = false;
     refreshAll();
     toast("应用完成，建议清单已更新");
-  } catch (e) { toast("应用失败：" + e.message); if (b) b.disabled = false; }
+  } catch (e) {
+    showError("应用失败：" + e.message, false);
+    if (b) b.disabled = false;
+    if (c) { c.disabled = false; c.textContent = "先不应用"; }
+  }
 }
 async function boardAct(payload) {
   try {
@@ -1856,17 +2013,18 @@ async function importBoard(input) {
   const cur = STATE.board || { projects: [], tasks: [] };
   if (!confirm("导入将覆盖当前看板（现有 " + (cur.projects || []).length + " 个项目、"
     + (cur.tasks || []).length + " 个任务；旧数据会自动备份为 .pre-import.bak）。"
-    + "\\n\\n将导入：" + nProj + " 个项目、" + nTask + " 个任务。确定继续？")) return;
+    + "\n\n将导入：" + nProj + " 个项目、" + nTask + " 个任务。确定继续？")) return;
   try {
     const r = await fetch("/api/board", { method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "import_board", data: data }) });
     const res = await r.json();
-    if (res.ok === false && res.error) { toast(res.error); return; }
+    if (res.ok === false) { showError(res.error || "导入失败。", false); return; }
     STATE = res.state || STATE; refreshAll();
+    hideError();
     toast("导入完成：" + ((res.imported || {}).projects || 0) + " 个项目、"
       + ((res.imported || {}).tasks || 0) + " 个任务");
-  } catch (e) { toast("导入失败：" + e.message); }
+  } catch (e) { showError("导入失败：" + e.message, false); }
 }
 function copyAI() { copyText((STATE.copy || {}).ai_prompt || ""); }
 function copyText(text) {
