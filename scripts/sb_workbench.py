@@ -21,7 +21,8 @@ Electron 壳最重（本机实证 9 类坑）、「发布为应用」是云端�
   - 「立即检查」= 直接 subprocess 跑 sb_healthlite（不依赖调度）
 
 安全边界：
-  - 只绑定 127.0.0.1（局域网不可达）——本地控制面的主要防线
+  - 默认只绑定 127.0.0.1（局域网不可达）——本地控制面的主要防线；
+    --host 0.0.0.0 局域网模式为显式 opt-in，服务无鉴权，仅限可信网络
   - 写操作仅限 registry 开关与显式按钮动作；**绝不自动 apply
     整合提案**（两段式铁律：apply 永远走 sb_consolidate --apply 人工通道）
 
@@ -29,19 +30,22 @@ Electron 壳最重（本机实证 9 类坑）、「发布为应用」是云端�
   python sb_workbench.py                 # 默认 127.0.0.1:8917，自动开浏览器
   python sb_workbench.py --port 8918     # 换端口
   python sb_workbench.py --no-browser    # 不自动开浏览器（计划任务场景）
+  python sb_workbench.py --host 0.0.0.0  # 局域网模式：手机同 Wi-Fi 访问（无鉴权，可信网络用完即关）
   双击 Start-Workbench.bat               # 无代码用户入口
+  双击 Start-Workbench-LAN.bat           # 无代码用户的局域网入口（R4）
 """
 
 import argparse
 import html
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
 import uuid
 import webbrowser
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
@@ -204,6 +208,93 @@ def _read_health():
     return sb_core.read_json(_HEALTH_PATH)
 
 
+# ---------------------------------------------------------------------------
+# 激励层数据（R1）：全部服务端预聚合，前端只渲染。
+# streak 遵循「渐变式不归零」语义（学 Loop 习惯打卡）：中断不清零——
+# 显示「上次连续 N 天 + 已中断 M 天 + 历史最高 K 天」，跑一次就续上。
+# ---------------------------------------------------------------------------
+_STATUS_RANK = {"ok": 0, "warn": 1, "error": 2, "corrupt": 3}
+
+
+def _worst_status(a, b):
+    return b if _STATUS_RANK.get(b, 0) > _STATUS_RANK.get(a, 0) else a
+
+
+def _board_stats(b):
+    """看板完成率统计：全局 + 各项目 done/total（完成率环与项目进度条的数据源）。"""
+    tasks = [t for t in (b.get("tasks") or []) if isinstance(t, dict)]
+    done = sum(1 for t in tasks if t.get("done"))
+    by_project = {}
+    for p in (b.get("projects") or []):
+        if not isinstance(p, dict):
+            continue
+        pt = [t for t in tasks if t.get("project") == p.get("name")]
+        by_project[p.get("id")] = {
+            "done": sum(1 for t in pt if t.get("done")),
+            "total": len(pt),
+        }
+    return {"tasks_total": len(tasks), "tasks_done": done,
+            "rate": round(done / len(tasks) * 100) if tasks else 0,
+            "by_project": by_project}
+
+
+def _health_pulse(history):
+    """体检激励数据：连续天数（渐变式）+ 近 30 天次数 + 42 天日历热力图聚合。"""
+    days = {}  # "YYYY-MM-DD" -> {"count": n, "worst": 最差状态}
+    for r in history or []:
+        if not isinstance(r, dict):
+            continue
+        d = str(r.get("ts") or "")[:10]
+        if not d:
+            continue
+        e = days.setdefault(d, {"count": 0, "worst": "ok"})
+        e["count"] += 1
+        e["worst"] = _worst_status(e["worst"], r.get("status") or "ok")
+    if not days:
+        # 空历史也返回 42 格灰格：用户能看到「记录会出现在这里」的结构
+        today = date.today()
+        return {"current": 0, "best": 0, "broken_days": 0, "runs30": 0,
+                "last": None,
+                "heatmap": [{"date": (today - timedelta(days=i)).isoformat(),
+                             "count": 0, "worst": None}
+                            for i in range(41, -1, -1)]}
+    today = date.today()
+    dts = sorted(days.keys(), reverse=True)
+    try:
+        last_d = date.fromisoformat(dts[0])
+    except ValueError:
+        last_d = today
+    # 中断天数：最后一次体检到今天之间漏掉的天数（今天/昨天跑过都不算断）
+    broken = max(0, (today - last_d).days - 1)
+    # 当前连续段：从最后一次体检日往回数每天都有记录的天数
+    current, cur = 0, last_d
+    while cur.isoformat() in days:
+        current += 1
+        cur -= timedelta(days=1)
+    # 历史最高连续（全历史扫描）
+    best = run = 0
+    prev = None
+    for d in sorted(days.keys()):
+        try:
+            dd = date.fromisoformat(d)
+        except ValueError:
+            continue
+        run = run + 1 if (prev is not None and (dd - prev).days == 1) else 1
+        best = max(best, run)
+        prev = dd
+    d30 = (today - timedelta(days=29)).isoformat()
+    runs30 = sum(e["count"] for d, e in days.items() if d >= d30)
+    # 42 天热力图（含今天，向前推 41 天；timedelta 自动处理跨月/跨年）
+    heatmap = []
+    for i in range(41, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        e = days.get(d) or {}
+        heatmap.append({"date": d, "count": e.get("count", 0),
+                        "worst": e.get("worst")})
+    return {"current": current, "best": best, "broken_days": broken,
+            "runs30": runs30, "last": dts[0], "heatmap": heatmap}
+
+
 def _run_sm(*args, timeout=SCHTASKS_TIMEOUT_SEC):
     """调 schedule_manager（调度动作唯一通道，不直写 schtasks）。"""
     cmd = [sys.executable, os.path.join(SCRIPTS, "schedule_manager.py"), *args]
@@ -257,6 +348,7 @@ def api_state():
             history = []
     except (OSError, json.JSONDecodeError):
         history = []
+    board = _read_board()
     return {
         "registry": reg,
         "services": _services(reg, ws),
@@ -264,10 +356,12 @@ def api_state():
         "health": health,
         "health_friendly": _friendly_issues(health),
         "health_history": history[-30:],
+        "pulse": _health_pulse(history),      # R1 激励层（streak+热力图聚合）
         "consolidation_proposals": proposals,
         "copy": {"ai_prompt": _ai_prompt(health, ws)},
         "dashboard": dash,
-        "board": _read_board(),
+        "board": board,
+        "board_stats": _board_stats(board),   # R1 完成率（全局+各项目）
     }
 
 
@@ -480,6 +574,59 @@ def _norm_due(d):
         return None
 
 
+def _validate_import(b):
+    """R2 导入消毒：结构合法才放行，字段逐条净化重建（不信任外部文件）。
+
+    返回 (ok, result)：失败时 result 是人话错误；成功时是重建后的干净 board。"""
+    if not isinstance(b, dict):
+        return False, "文件格式不对：应该是一个 JSON 对象"
+    if not (isinstance(b.get("projects"), list)
+            and isinstance(b.get("tasks"), list)):
+        return False, "文件里没有 projects / tasks 数据，不像本工作台导出的备份"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    clean = {"version": 1, "projects": [], "tasks": []}
+    seen_p, seen_t = set(), set()
+    for p in b["projects"][:200]:
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get("name") or "").strip()[:40]
+        if not name:
+            continue
+        if len(clean["projects"]) >= 200:
+            break
+        pid = str(p.get("id") or "")[:40]
+        if not pid or pid in seen_p:
+            pid = _new_id("p")
+        seen_p.add(pid)
+        clean["projects"].append({
+            "id": pid, "name": name,
+            "status": p.get("status") if p.get("status") in BOARD_STATUSES else "进行中",
+            "note": str(p.get("note") or "").strip()[:200],
+            "pinned": bool(p.get("pinned")),
+            "updated_at": str(p.get("updated_at") or now)[:20],
+        })
+    for t in b["tasks"]:
+        # 先过滤后截断：坏数据（空标题/非法条目）不占用 2000 条护栏名额
+        if len(clean["tasks"]) >= 2000:
+            break
+        if not isinstance(t, dict):
+            continue
+        title = str(t.get("title") or "").strip()[:120]
+        if not title:
+            continue
+        tid = str(t.get("id") or "")[:40]
+        if not tid or tid in seen_t:
+            tid = _new_id("t")
+        seen_t.add(tid)
+        clean["tasks"].append({
+            "id": tid, "title": title,
+            "project": str(t.get("project") or "").strip()[:60],
+            "done": bool(t.get("done")),
+            "due": _norm_due(t.get("due")),
+        })
+    return True, clean
+
+
 def api_board(payload):
     """看板 CRUD 单端点分发（写动作仅限 board JSON，无路径/命令透传）。"""
     action = payload.get("action")
@@ -537,6 +684,21 @@ def api_board(payload):
         p["pinned"] = not p.get("pinned")
     elif action == "del_project":
         b["projects"] = [x for x in b["projects"] if x.get("id") != payload.get("id")]
+    elif action == "import_board":
+        # R2 导入恢复：消毒校验通过才落盘；旧文件先备份 .pre-import.bak
+        # （铁律 2：导入必须支持上千条、清空级操作需确认——确认在前端 confirm 完成）
+        ok, result = _validate_import(payload.get("data"))
+        if not ok:
+            return {"ok": False, "error": result}
+        if os.path.exists(_BOARD_PATH):
+            try:
+                os.replace(_BOARD_PATH, _BOARD_PATH + ".pre-import.bak")
+            except OSError:
+                pass
+        _write_board(result)
+        return {"ok": True, "imported": {"projects": len(result["projects"]),
+                                         "tasks": len(result["tasks"])},
+                "state": api_state()}
     else:
         return {"ok": False, "error": f"未知操作: {action}"}
     _write_board(b)
@@ -554,10 +716,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- GET ----
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        path_only = self.path.split("?", 1)[0]
+        if path_only in ("/", "/index.html"):
             body = PAGE_HTML.replace("__PORT__", str(self.server.server_address[1]))
             self._send_html(body)
-        elif self.path == "/api/state":
+        elif path_only == "/api/state":
             self._send_json(api_state())
         elif self.path == "/api/board/poll":
             # 轻量轮询端点：只读 board，无子进程——「对话即上板」实时性靠它（5s）
@@ -590,7 +753,8 @@ class Handler(BaseHTTPRequestHandler):
     # ---- POST ----
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
-        if length > 2048:
+        # 256KB：看板导入恢复（R2）的 JSON 体积可达数十 KB；仅本机回环可达
+        if length > 262144:
             self._send_json({"ok": False, "error": "payload too large"}, 413)
             return
         try:
@@ -659,10 +823,19 @@ PAGE_HTML = r"""
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>超脑工作台</title>
+<script>
+/* 防闪白：渲染前先定主题（URL 参数 ?theme= > localStorage > 跟随系统） */
+(function(){var t=null;
+try{var q=new URLSearchParams(location.search).get("theme");
+if(q==="dark"||q==="light"){t=q;}else{t=localStorage.getItem("wb_workbench_theme");}}catch(e){}
+if(t!=="dark"&&t!=="light"){t=(window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";}
+if(t==="dark")document.documentElement.dataset.theme="dark";})();
+</script>
 <style>
   /* 设计 Token — 白盒子画廊语言（源自 a1m1ng.cn v8）× 超脑琥珀 */
   :root {
     --bg:        #faf9f6;
+    --surface:   #ffffff;
     --warm-gray: #ebe8e2;
     --line:      #d9d4cc;
     --ink:       #1a1917;
@@ -676,12 +849,45 @@ PAGE_HTML = r"""
     --ok:        #1D9E75;
     --err:       #C0442B;
     --card-dark: #1a1917;
+    --due-ink:   #7c3117;
     --serif: 'Noto Serif SC', Georgia, 'Songti SC', serif;
     --mono:  'JetBrains Mono', 'SF Mono', Consolas, monospace;
     --sans:  'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --shadow: 0 12px 36px rgba(26,25,23,.09);
     --shadow-hover: 0 18px 48px rgba(26,25,23,.14);
   }
+  /* ── 暗色主题（R3）：琥珀提亮一档保对比；amber-deep 语义反转
+     （亮色=更深的琥珀字，暗色=更亮的琥珀字）；color-scheme 让原生
+     控件（checkbox/date/滚动条）跟随暗色。iframe 内 dashboard 暂保持亮色。 */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:        #141311;
+    --surface:   #1e1d1a;
+    --warm-gray: #2a2721;
+    --line:      #3a362e;
+    --ink:       #ece9e2;
+    --ink2:      #b3afa4;
+    --ink3:      #837f74;
+    --amber:     #E89B2E;
+    --amber-deep:#f0b45e;
+    --amber-soft:rgba(232,155,46,.13);
+    --cinnabar:  #d4694a;
+    --cinnabar-soft: rgba(212,105,74,.13);
+    --ok:        #2fb98c;
+    --err:       #e06a4e;
+    --card-dark: #1e1c19;
+    --due-ink:   #f0a58f;
+    --shadow: 0 12px 36px rgba(0,0,0,.45);
+    --shadow-hover: 0 18px 48px rgba(0,0,0,.55);
+  }
+  :root[data-theme="dark"] .hero { border:1px solid rgba(255,255,255,.07); }
+  :root[data-theme="dark"] .slider { background:#45413a; }
+  :root[data-theme="dark"] .toast { border:1px solid var(--line); }
+  /* 主题切换小圆钮（sub 行右侧） */
+  .themebtn { width:34px; height:34px; min-height:0; padding:0; display:inline-flex;
+              align-items:center; justify-content:center; border-radius:50%;
+              color:var(--ink3); flex:none; }
+  .themebtn:hover { color:var(--amber); }
   * { box-sizing:border-box; margin:0; padding:0; }
   ::selection { background:var(--cinnabar); color:#fff; }
   body { background:var(--bg); color:var(--ink); font-family:var(--sans);
@@ -718,7 +924,7 @@ PAGE_HTML = r"""
   .graphbar { display:flex; align-items:center; gap:12px; margin-bottom:12px;
               flex-wrap:wrap; }
   .graph-frame-wrap { border:1px solid var(--line); border-radius:16px; overflow:hidden;
-                      background:#fff; box-shadow:var(--shadow); }
+                      background:var(--surface); box-shadow:var(--shadow); }
   #graph-frame { width:100%; height:78vh; border:none; display:block; }
 
   .card { background:var(--card); border:1px solid var(--line); border-radius:16px;
@@ -758,15 +964,26 @@ PAGE_HTML = r"""
   .dot.err{background:var(--err);} .dot.off{background:#c9c4b4;}
   .dot.run{background:var(--amber); animation:pulse 1.1s infinite;}
   @keyframes pulse { 50% { opacity:.3; } }
+  /* R5 微交互：完成率环加载/更新时从满圈扫到目标值（勾任务即重放=完成反馈） */
+  @keyframes ringfill { from { stroke-dashoffset:157.1; } }
+  /* R5 勾选完成 pop：checkbox 先放大再回弹（物理手感） */
+  @keyframes pop { 0% { transform:scale(1); } 40% { transform:scale(1.3); }
+                   100% { transform:scale(1); } }
 
   /* 按钮 */
-  button, a.btn { border:1px solid var(--line); background:#fff; border-radius:9px;
+  button, a.btn { border:1px solid var(--line); background:var(--surface); border-radius:9px;
            padding:7px 15px; font-size:13px; cursor:pointer; color:var(--ink2);
            text-decoration:none; display:inline-block; font-family:var(--sans);
            transition:transform .2s, box-shadow .2s, border-color .2s, color .2s; }
   button:hover, a.btn:hover { border-color:var(--amber); color:var(--amber-deep);
            transform:translateY(-1px); box-shadow:0 4px 12px rgba(26,25,23,.08); }
   button:disabled { opacity:.45; cursor:default; transform:none; box-shadow:none; }
+  /* R5 微交互：物理按压手感（hover 抬起 → active 压下，卡槽反馈） */
+  button:active, a.btn:active { transform:translateY(0) scale(.97); box-shadow:none; }
+  /* R5 键盘可达基线：Tab 聚焦可见环（hover 态不干扰鼠标用户） */
+  button:focus-visible, a.btn:focus-visible, .binput:focus-visible,
+  input[type="checkbox"]:focus-visible, input[type="date"]:focus-visible {
+           outline:2px solid var(--amber); outline-offset:2px; }
   button.primary { background:var(--amber); border-color:var(--amber); color:#fff;
                    font-weight:600; }
   button.primary:hover { background:var(--amber-deep); border-color:var(--amber-deep); color:#fff; }
@@ -783,9 +1000,10 @@ PAGE_HTML = r"""
   .switch { position:relative; width:44px; height:24px; flex:none; cursor:pointer; }
   .switch input { display:none; }
   .slider { position:absolute; inset:0; background:#d9d3c2; border-radius:12px;
-            transition:background .2s; }
+            transition:background .25s; }
   .slider::after { content:""; position:absolute; width:18px; height:18px; border-radius:50%;
-            background:#fff; top:3px; left:3px; transition:left .2s;
+            background:#fff; top:3px; left:3px;
+            transition:left .25s cubic-bezier(.34,1.56,.64,1);   /* R5 spring 回弹 */
             box-shadow:0 1px 3px rgba(0,0,0,.18); }
   .switch input:checked + .slider { background:var(--amber); }
   .switch input:checked + .slider::after { left:23px; }
@@ -800,12 +1018,35 @@ PAGE_HTML = r"""
   .confirm { margin-top:12px; background:var(--amber-soft); border:1px solid rgba(217,138,31,.3);
              border-radius:10px; padding:12px 14px; font-size:13px; color:var(--amber-deep); }
 
+  /* ── 节奏条（R1 激励层）：完成率环 + 体检连续 + 热力图 ── */
+  .pulse { display:flex; align-items:center; gap:26px; flex-wrap:wrap;
+           background:var(--surface); border:1px solid var(--line); border-radius:16px;
+           padding:16px 22px; margin:14px 0 0;
+           box-shadow:0 1px 2px rgba(26,25,23,.04); }
+  .pulse .seg { display:flex; align-items:center; gap:13px; }
+  .pulse .big { font-family:var(--serif); font-size:27px; font-weight:900;
+                letter-spacing:-.5px; line-height:1.1; }
+  .pulse .lbl { font-size:11.5px; color:var(--ink3); line-height:1.55; }
+  .pulse .lbl b { color:var(--ink2); font-weight:600; }
+  .pulse .heat { display:flex; gap:3px; flex-wrap:wrap; margin-left:auto;
+                 max-width:270px; }
+  .heat i { width:11px; height:11px; border-radius:3px; background:var(--warm-gray); }
+  .heat i.h1 { background:#f0d8ae; }
+  .heat i.h2 { background:var(--amber); }
+  .heat i.herr { background:var(--err); }
+  .heat i.today { outline:2px solid var(--cinnabar); outline-offset:1px; }
+
   /* ── 04 正在推进 ── */
   .duebox { background:var(--cinnabar-soft); border:1px solid rgba(184,69,37,.2);
             border-radius:10px; padding:10px 13px; font-size:12.5px;
-            color:#7c3117; margin-bottom:14px; }
+            color:var(--due-ink); margin-bottom:14px; }
   .duebox.soon { background:var(--amber-soft); border-color:rgba(217,138,31,.28);
                  color:var(--amber-deep); }
+  /* 项目进度条（R1）：任务完成度一眼可见 */
+  .pbar { height:3px; background:var(--warm-gray); border-radius:2px;
+          margin-top:8px; overflow:hidden; }
+  .pbar i { display:block; height:100%; background:var(--amber);
+            border-radius:2px; transition:width .4s; }
   .proj { padding:14px 0; border-bottom:1px dashed var(--line); }
   .proj:last-of-type { border-bottom:none; }
   .proj.ispinned { background:linear-gradient(90deg, var(--amber-soft), transparent 55%);
@@ -835,8 +1076,10 @@ PAGE_HTML = r"""
           font-size:13.5px; }
   .task input[type="checkbox"] { width:16px; height:16px; accent-color:var(--amber);
           margin-top:2px; cursor:pointer; flex:none; }
+  .task input[type="checkbox"]:checked { animation:pop .25s ease-out; }   /* R5 勾选 pop */
   .task.done .t-title { text-decoration:line-through; color:#b0aa9c; }
-  .t-title { flex:1 1 auto; word-break:break-word; }
+  .t-title { flex:1 1 auto; word-break:break-word;
+             transition:color .3s, opacity .3s; }   /* R5 完成划线颜色渐变 */
   .t-due { flex:none; font-family:var(--mono); font-size:10.5px; letter-spacing:.5px;
            color:var(--ink3); margin-top:3px; }
   .t-due.over { color:var(--err); font-weight:700; }
@@ -844,7 +1087,7 @@ PAGE_HTML = r"""
   .bform { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
   .binput { flex:1 1 180px; border:1px solid var(--line); border-radius:9px;
             padding:8px 12px; font-size:16px; font-family:var(--sans); color:var(--ink);
-            background:#fff; min-width:0; }
+            background:var(--surface); min-width:0; }
   .binput:focus { outline:none; border-color:var(--amber);
             box-shadow:0 0 0 3px var(--amber-soft); }
   .binput.short { flex:0 1 150px; }
@@ -857,7 +1100,7 @@ PAGE_HTML = r"""
            max-width:86vw; box-shadow:var(--shadow); }
   .toast.show { opacity:.96; }
   @media (max-width:768px) {
-    .wrap { padding:22px 14px 56px; }
+    .wrap { padding:22px 14px calc(56px + env(safe-area-inset-bottom)); }
     .hero { padding:20px 18px; }
     .row { flex-direction:column; }
     .row .side { flex-direction:row !important; width:100%;
@@ -865,6 +1108,13 @@ PAGE_HTML = r"""
     .proj-tools { margin-left:0; width:100%; justify-content:flex-start; }
     button, a.btn { padding:11px 16px; font-size:14px; min-height:44px; }
     h1 { font-size:24px; }
+    .pulse { gap:16px; padding:14px 16px; }
+    .pulse .heat { margin-left:0; max-width:none; width:100%; }
+  }
+  /* R5 无障碍基线：系统开启「减弱动态效果」时全站动效一刀切关闭
+     （环/热力图直接显示终值，功能不受影响） */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation:none !important; transition:none !important; }
   }
 </style>
 </head>
@@ -872,7 +1122,10 @@ PAGE_HTML = r"""
 <div class="wrap">
   <div class="kicker">Super Brain · Workbench</div>
   <h1>超脑工作台<small>记忆库管家 · 127.0.0.1:__PORT__</small></h1>
-  <div class="sub">全部在你的电脑上完成：不联网、不花 AI 用量、无遥测。<span id="dashmeta"></span></div>
+  <div class="sub" style="display:flex;align-items:center;gap:12px">
+    <span style="flex:1">全部在你的电脑上完成：不联网、不花 AI 用量、无遥测。<span id="dashmeta"></span></span>
+    <button id="theme-btn" class="themebtn" onclick="toggleTheme()" title="切换深色/浅色" aria-label="切换深色/浅色主题"></button>
+  </div>
 
   <nav class="tabs">
     <button class="tab active" id="tabbtn-home" onclick="switchTab('home')">
@@ -883,6 +1136,7 @@ PAGE_HTML = r"""
 
   <div id="tab-home">
   <section id="hero" class="hero" aria-live="polite"></section>
+  <section id="pulse" class="pulse" aria-label="完成率与体检节奏"></section>
 
   <h2 class="sec"><span class="no">01</span>自动打理</h2>
   <div id="services"></div>
@@ -921,6 +1175,45 @@ let EXPANDED = new Set();     // 展开任务清单的项目 id
 let EDIT_ID = null;           // 正在编辑 note 的项目 id
 
 const $ = id => document.getElementById(id);
+
+// ---------------- 主题（R3 暗色模式）：localStorage 记忆，首次跟随系统 ----------------
+const THEME_KEY = "wb_workbench_theme";
+function themeIcon(dark) {
+  return dark
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">'
+      + '<circle cx="12" cy="12" r="4.2" fill="currentColor"/>'
+      + '<path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M4.9 4.9L7 7M17 17l2.1 2.1'
+      + 'M19.1 4.9L17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="1.8"'
+      + ' stroke-linecap="round"/></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">'
+      + '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z" fill="none"'
+      + ' stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+}
+function applyTheme(t) {
+  const dark = t === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const b = $("theme-btn");
+  if (b) { b.innerHTML = themeIcon(dark);
+           b.title = dark ? "切换到浅色" : "切换到深色"; }
+}
+function initTheme() {
+  let t = null;
+  try {
+    const q = new URLSearchParams(location.search).get("theme");
+    t = (q === "dark" || q === "light") ? q : localStorage.getItem(THEME_KEY);
+  } catch (e) {}
+  if (t !== "dark" && t !== "light") {
+    t = (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches)
+        ? "dark" : "light";
+  }
+  applyTheme(t);   // head 防闪脚本已设 dataset，这里补齐按钮图标
+}
+function toggleTheme() {
+  const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(t);
+  try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
+}
+
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"]/g,
     c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -976,6 +1269,7 @@ function refreshAll() {
   const dm = STATE.dashboard && STATE.dashboard.mtime;
   $("dashmeta").textContent = dm ? "健康看板数据生成于 " + dm + "。" : "";
   renderHero();
+  renderPulse();
   renderServices();
   renderDecide();
   renderBoard();
@@ -992,10 +1286,30 @@ async function pollBoard() {
     const r = await fetch("/api/board/poll");
     const b = await r.json();
     const cur = STATE.board && STATE.board.updated_at;
-    if (b && b.updated_at !== cur) { STATE.board = b; renderBoard(); }
+    if (b && b.updated_at !== cur) {
+      STATE.board = b;
+      STATE.board_stats = localBoardStats(b);  // 完成率环即时反映（本地重算，不回源）
+      renderBoard();
+      renderPulse();
+    }
   } catch (e) { /* 静默：下一轮再试 */ }
 }
 setInterval(pollBoard, 5000);
+
+// board 统计的本地重算（与服务端 _board_stats 同口径）：poll 轻量更新用
+function localBoardStats(b) {
+  const tasks = (b && b.tasks) || [];
+  const projects = (b && b.projects) || [];
+  const done = tasks.filter(t => t.done).length;
+  const by = {};
+  projects.forEach(p => {
+    const pt = tasks.filter(t => t.project === p.name);
+    by[p.id] = { done: pt.filter(t => t.done).length, total: pt.length };
+  });
+  return { tasks_total: tasks.length, tasks_done: done,
+           rate: tasks.length ? Math.round(done / tasks.length * 100) : 0,
+           by_project: by };
+}
 
 // ---------------- Tab 融合导航（管家 / 记忆图谱） ----------------
 let GRAPH_LOADED = false;
@@ -1032,9 +1346,19 @@ async function refreshGraph(btn) {
 function renderGraphBar() {
   const el = $("graph-meta");
   if (!el) return;
-  const dm = STATE.dashboard && STATE.dashboard.mtime;
+  const dm = STATE && STATE.dashboard && STATE.dashboard.mtime;   // null 防护：?tab=graph 直达时数据未到
   el.textContent = "数据快照（只读统计）"
     + (dm ? " · 生成于 " + dm : " · 进入本页时自动生成");
+}
+// R4：iframe 高度自适应 —— /dashboard 与宿主同源（本服务托管），直接量内容高度，
+// 看板随宿主页面自然滚动（移动端无嵌套滚动陷阱）；量不到时保持 CSS 78vh 内滚兜底。
+function fitGraphFrame() {
+  const f = $("graph-frame");
+  if (!f) return;
+  try {
+    const h = f.contentDocument && f.contentDocument.documentElement.scrollHeight;
+    if (h && h > 240) f.style.height = (h + 24) + "px";
+  } catch (e) { /* 跨域/加载异常：保持 78vh */ }
 }
 
 // ---------------- 01 状态横幅（深色作品卡） ----------------
@@ -1110,6 +1434,62 @@ function trendSvg(hist) {
     + ' checks</span><svg width="' + w + '" height="' + h
     + '" style="display:block;margin-top:5px" aria-hidden="true">' + bars
     + '</svg></div>';
+}
+
+// ---------------- 节奏条（R1 激励层）：完成率环 + streak + 热力图 ----------------
+function ringSvg(pct) {
+  const r = 25, c = 2 * Math.PI * r;
+  const off = (c * (1 - Math.max(0, Math.min(100, pct)) / 100)).toFixed(1);
+  return '<svg width="62" height="62" viewBox="0 0 64 64" role="img"'
+    + ' aria-label="任务完成率 ' + pct + '%">'
+    + '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke-width="6.5"'
+    + ' style="stroke:var(--warm-gray)"/>'
+    + '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke-width="6.5"'
+    + ' stroke-linecap="round" stroke-dasharray="' + c.toFixed(1) + '"'
+    + ' stroke-dashoffset="' + off + '" transform="rotate(-90 32 32)"'
+    + ' style="stroke:var(--amber); animation:ringfill .9s cubic-bezier(.2,.8,.2,1)"/>'
+    + '<text x="32" y="30" text-anchor="middle" dominant-baseline="middle"'
+    + ' style="font:900 15px Georgia,serif;fill:var(--ink)">' + pct + '</text>'
+    + '<text x="32" y="45" text-anchor="middle"'
+    + ' style="font:600 6.5px Consolas,monospace;letter-spacing:1px;'
+    + 'fill:var(--ink3)">DONE</text></svg>';
+}
+function renderPulse() {
+  const el = $("pulse");
+  if (!el) return;
+  const bs = STATE.board_stats || {};
+  const pl = STATE.pulse || {};
+  const total = bs.tasks_total || 0;
+  const rate = bs.rate || 0;
+  // streak 文案：中断不清零（渐变式语义），历史最高始终在
+  let streak;
+  if (!pl.last) {
+    streak = '<span class="big">—</span><div class="lbl">还没体检过<br>跑一次开始积累连续记录</div>';
+  } else if (pl.broken_days > 0) {
+    streak = '<span class="big">' + (pl.current || 0) + '</span><div class="lbl">'
+      + '上次连续 <b>' + (pl.current || 0) + '</b> 天 · 已中断 <b>' + pl.broken_days
+      + '</b> 天<br>历史最高 <b>' + (pl.best || 0) + '</b> 天 · 跑一次体检就续上，记录还在</div>';
+  } else {
+    streak = '<span class="big">' + (pl.current || 0) + '</span><div class="lbl">'
+      + '天连续体检 · 近 30 天 <b>' + (pl.runs30 || 0) + '</b> 次<br>历史最高 <b>'
+      + (pl.best || 0) + '</b> 天</div>';
+  }
+  // 42 天热力图：灰=无记录、浅琥珀=1 次、琥珀=2+ 次、红=当天有 error
+  const cells = (pl.heatmap || []).map((d, i) => {
+    const cls = (d.worst === "error" || d.worst === "corrupt") ? " herr"
+              : d.count >= 2 ? " h2" : d.count === 1 ? " h1" : "";
+    const dt = d.date.slice(5).replace("-", "月") + "日";
+    const tip = d.count ? dt + " · 体检 " + d.count + " 次 · " + d.worst
+                        : dt + " · 无记录";
+    return '<i class="' + cls.trim()
+      + (i === (pl.heatmap.length - 1) ? " today" : "")
+      + '" title="' + esc(tip) + '"></i>';
+  }).join("");
+  el.innerHTML = '<div class="seg">' + ringSvg(rate)
+    + '<div class="lbl">任务完成率<br><b>' + (bs.tasks_done || 0) + " / " + total
+    + '</b> 件</div></div>'
+    + '<div class="seg">' + streak + '</div>'
+    + '<div class="heat" aria-hidden="true">' + cells + '</div>';
 }
 
 // ---------------- 02 自动打理 ----------------
@@ -1243,6 +1623,8 @@ function renderBoard() {
 
   const projBlock = (p, idx, total) => {
     const myOpen = open.filter(t => t.project === p.name);
+    const myDoneN = done.filter(t => t.project === p.name).length;
+    const myAll = myOpen.length + myDoneN;
     const isOpen = EXPANDED.has(p.id);
     // 工具钮组只留管理动作（置顶/排序/删除），展开改由点击整行触发
     const tools =
@@ -1267,9 +1649,14 @@ function renderBoard() {
       + ' onclick="event.stopPropagation();cycleStatus(\'' + p.id + '\',\''
         + esc(p.status) + '\')">'
       + esc(p.status) + '</span>'
-      + '<span class="t-count">' + (myOpen.length ? myOpen.length + " 待办" : "—")
-      + '</span>'
+      + '<span class="t-count" title="已完成/全部任务">'
+      + (myAll ? myDoneN + "/" + myAll : "—") + '</span>'
       + '<div class="proj-tools">' + tools + '</div></div>';
+    if (myAll) {
+      const pct = Math.round(myDoneN / myAll * 100);
+      body += '<div class="pbar" title="任务完成 ' + myDoneN + '/' + myAll
+        + '（' + pct + '%）"><i style="width:' + pct + '%"></i></div>';
+    }
     if (EDIT_ID === p.id) {
       body += '<div class="bform" style="margin-top:8px">'
         + '<input class="binput" id="ed-note" maxlength="200" value="'
@@ -1298,9 +1685,23 @@ function renderBoard() {
   // 「日常」：无项目归属的待办
   const loose = open.filter(t => !t.project || !projects.some(p => p.name === t.project));
 
-  el.innerHTML = urgentHtml
+  // 铁律 2：数据积累 30 条以上时温和提示备份（数据只在本机，无云端）
+  const nAll = tasks.length + projects.length;
+  const backupHint = (nAll >= 30)
+    ? '<div class="duebox soon" style="margin-bottom:12px"><b>看板数据已有 ' + nAll
+      + ' 条。</b>它们只保存在这台电脑上——建议点右上「导出 JSON」留一份备份。</div>'
+    : "";
+
+  el.innerHTML = urgentHtml + backupHint
     + '<div class="proj" style="border-bottom:none;padding-bottom:4px">'
-    + '<div class="proj-head" style="cursor:default"><span class="mno">Projects · 点击行展开任务 · 工具钮：置顶 / 排序 / 删除</span></div></div>'
+    + '<div class="proj-head" style="cursor:default;gap:10px">'
+    + '<span class="mno">Projects · 点击行展开任务 · 工具钮：置顶 / 排序 / 删除</span>'
+    + '<span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex:none">'
+    + '<button style="padding:4px 12px;font-size:12px" onclick="exportBoard()">导出 JSON</button>'
+    + '<button style="padding:4px 12px;font-size:12px" onclick="importBoardClick()">导入恢复</button>'
+    + '<input type="file" id="import-file" accept=".json,application/json" style="display:none"'
+    + ' onchange="importBoard(this)">'
+    + '</span></div></div>'
     + (ordered.length ? ordered.map((p, i) => projBlock(p, i, ordered.length)).join("")
         : '<div class="meta" style="padding:4px 0 8px">还没有项目，在下方添加一个。</div>')
     + '<div class="bform">'
@@ -1426,6 +1827,47 @@ async function boardAct(payload) {
     STATE = res.state || STATE; refreshAll(); return true;
   } catch (e) { toast("操作失败：" + e.message); return false; }
 }
+
+// ---------------- R2：看板导出 / 导入恢复（铁律 2 数据备份） ----------------
+function exportBoard() {
+  const b = STATE.board || { projects: [], tasks: [] };
+  const blob = new Blob([JSON.stringify(b, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "workbench-board-" + todayStr() + ".json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast("已导出到下载目录（含 " + ((b.tasks || []).length) + " 个任务）");
+}
+function importBoardClick() {
+  const f = $("import-file");
+  if (f) f.click();
+}
+async function importBoard(input) {
+  const f = input.files && input.files[0];
+  input.value = "";   // 清空以便下次能重选同一文件
+  if (!f) return;
+  let data;
+  try { data = JSON.parse(await f.text()); }
+  catch (e) { toast("这个文件不是有效的 JSON"); return; }
+  const nProj = (Array.isArray((data || {}).projects) ? data.projects : []).length;
+  const nTask = (Array.isArray((data || {}).tasks) ? data.tasks : []).length;
+  if (!nProj && !nTask) { toast("文件里没有项目或任务数据"); return; }
+  const cur = STATE.board || { projects: [], tasks: [] };
+  if (!confirm("导入将覆盖当前看板（现有 " + (cur.projects || []).length + " 个项目、"
+    + (cur.tasks || []).length + " 个任务；旧数据会自动备份为 .pre-import.bak）。"
+    + "\\n\\n将导入：" + nProj + " 个项目、" + nTask + " 个任务。确定继续？")) return;
+  try {
+    const r = await fetch("/api/board", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "import_board", data: data }) });
+    const res = await r.json();
+    if (res.ok === false && res.error) { toast(res.error); return; }
+    STATE = res.state || STATE; refreshAll();
+    toast("导入完成：" + ((res.imported || {}).projects || 0) + " 个项目、"
+      + ((res.imported || {}).tasks || 0) + " 个任务");
+  } catch (e) { toast("导入失败：" + e.message); }
+}
 function copyAI() { copyText((STATE.copy || {}).ai_prompt || ""); }
 function copyText(text) {
   navigator.clipboard.writeText(text).then(
@@ -1433,12 +1875,31 @@ function copyText(text) {
     () => toast("复制失败，请手动选择"));
 }
 
+initTheme();
+const urlTab = new URLSearchParams(location.search).get("tab");
+if (urlTab === "graph") switchTab("graph");   // R4 调试/直达通道（对称 ?theme=）
+$("graph-frame").addEventListener("load", () => {
+  fitGraphFrame();
+  setTimeout(fitGraphFrame, 350);   // 二次校准：字体/图片晚到导致的布局变化
+});
 load();
 setInterval(() => { if (!RUNNING) load(); }, 60000);
 </script>
 </body>
 </html>
 """
+
+
+def _lan_ip():
+    """R4：探测本机局域网 IP——UDP connect 只做路由选择不实际发包，安全即时。"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("223.5.5.5", 80))   # 阿里公共 DNS，仅用于选路
+        return s.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        s.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1457,11 +1918,19 @@ def main():
         return 1
 
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
-    url = f"http://{args.host}:{args.port}/"
-    print(f"[workbench] 超脑工作台已启动 → {url}（Ctrl+C 退出）")
-    print(f"[workbench] 只绑定 {args.host}，局域网不可达；写操作仅限组件开关与立即运行")
+    open_url = f"http://127.0.0.1:{args.port}/"   # 打开地址与绑定地址解耦：0.0.0.0 不是可访问 URL
+    print(f"[workbench] 超脑工作台已启动 → {open_url}（Ctrl+C 退出）")
+    if args.host in ("0.0.0.0", "::"):
+        ip = _lan_ip()
+        if ip:
+            print(f"[workbench] 局域网模式：手机连同一 Wi-Fi 打开 → http://{ip}:{args.port}/")
+        else:
+            print("[workbench] 局域网模式：未自动探测到局域网 IP，请 ipconfig 查看后手机访问。")
+        print("[workbench] 注意：服务无鉴权，仅限可信家庭/办公网络，用完即关。")
+    else:
+        print(f"[workbench] 只绑定 {args.host}，局域网不可达；写操作仅限组件开关与立即运行")
     if not args.no_browser:
-        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.2, lambda: webbrowser.open(open_url)).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

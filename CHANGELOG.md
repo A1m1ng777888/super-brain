@@ -1,5 +1,32 @@
 # Changelog — Super Brain 超脑
 
+## v3.12.3 (2026-08-31) — 工作台体验五连升级（激励层+数据安全+暗色+移动端+微交互）
+
+### 新增 — R1 节奏条（激励层，对标 Loop/Streaks）
+
+- 任务完成率环（SVG 手写，全局 done/total，对话勾任务 → poll 重算 → 环即时反映）+ 体检 streak 大数字（渐变式不归零：中断显示「上次连续 N 天 · 已中断 M 天 · 历史最高 K 天」，跑一次就续上）+ 42 天月历热力图（灰=无记录/浅琥珀=1 次/琥珀=2+ 次/红=当天有 error，今日格朱砂描边，hover 详情）+ 项目行细进度条（done/total 徽章替代「N 待办」）
+
+### 新增 — R2 看板导出/导入（数据安全，铁律 2 补课）
+
+- 「正在推进」区头导出 JSON（`workbench-board-YYYY-MM-DD.json`）+ 导入恢复（前端 confirm 二次确认 → 服务端 `_validate_import` 消毒：结构校验+字段净化+id 去重重生成+先过滤后截断 200 条/2000 条护栏）；旧文件落盘前自动备份 `.pre-import.bak`；POST 长度上限 2KB→256KB；数据 ≥30 条温和提示备份
+
+### 新增 — R3 暗色模式
+
+- `:root[data-theme="dark"]` 全量 token 重定义（琥珀/朱砂/ok/err 提亮保对比，--amber-deep 语义反转，`color-scheme:dark` 让 checkbox/date/滚动条跟随）；开关=sub 行小圆钮（月亮/太阳 SVG），偏好存 localStorage，首次跟随系统；head 内联防闪白脚本（优先级 URL `?theme=` > localStorage > 系统）；修复 `/?theme=` 404（do_GET 路由剥 query）
+
+### 新增 — R4 移动端 + iframe 自适应 + 局域网通道
+
+- `#graph-frame` 固定 78vh → 内容自适应（同源 iframe scrollHeight 量高 +24px，load 事件 + 350ms 双校准，异常保持 78vh 内滚兜底）——移动端消灭嵌套滚动陷阱；`?tab=graph` 直达通道 + renderGraphBar null 防护；局域网模式 `--host 0.0.0.0` 显式 opt-in（默认仍只绑回环），`_lan_ip()` UDP 选路探测自动打印手机可访问 URL，新增 `Start-Workbench-LAN.bat` 无代码入口（无鉴权，仅限可信网络）；移动端底部 safe-area 适配
+
+### 新增 — R5 微交互基线（纯 CSS 零架构改动）
+
+- 完成率环 `@keyframes ringfill` 动画（勾任务 → poll 重绘 → 动画重放 = 完成反馈）、勾选 pop（scale 1→1.3→1 物理手感）、任务划线颜色渐变、开关 spring 回弹（cubic-bezier overshoot）、`:active` 按压 + `:focus-visible` 键盘可达、`prefers-reduced-motion: reduce` 一刀切禁用
+
+### 测试
+
+- R4 冒烟 26 断言 + R5 冒烟 13 断言全绿（含铁律 9 DAG 六渲染函数零互调复查）；Playwright（channel:msedge 驱动系统 Edge）多轮截图验证：环动画中间态/终态收敛、reduced-motion 上下文零报错、移动 375px 单列无溢出、双主题零回归
+
+
 ## v3.12.2 (2026-08-31) — 工作台全线（写通道+看板+C 端化）+ 阶段2 整合/时态 + 图谱消融
 
 ### 新增 — 本地工作台 C 端化改造（产品视角，下午增量）
@@ -68,7 +95,7 @@
 - 全库 362 条 override 全为 demote 且 audit manual=0（不可溯源）；清除后候选池 225→563、晋升 8.9%（带内）、selfcheck 无新 issue
 - 备份：`memories.json.bak_20260831_clear_override`；清单：`superbrain-bench/results/clear_overrides_20260831.json`
 
-### 生产实测（workspace=本地知识库）
+### 生产实测（workspace=AAA本地知识库v1）
 
 - A×1（求职）+ B×0 + C×20（6412 字压缩）+ D×2（v3.7.2 发布误记、unknowns 原稿误记 supersede 链）应用；图谱 140 节点/276 边、general 48、整合候选 71→55
 - 30 题交付分：recall@5 **0.933 三连持平零回归** / mrr 0.808→0.792（仅「Skill 分档」单题 rank 1→2，仍命中）
