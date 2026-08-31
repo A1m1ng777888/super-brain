@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.12.1
+version: v3.12.2
 released: 2026-08-20
 author: A1m1ng777888
 license: MIT
 description: "Super Brain 超脑认知增强技能 v3.11.1。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。v3.9.6（自检评分优化）：gating_flood ratio 阈值 0.40→0.70、duplicates simhash 0.75→0.85、--fix 自动合并 0.95→0.85、task 默认 task_status=active、completeness 白名单扩展。v3.9.7（自动触发断裂链修复）：write_json 返回值补全消假警告、跨会话硬步骤死锁修复。v3.9.8（mattpocock 纪律库吸收）：decompose 曳光弹切片规格、frontier 拷问法、domain 项目术语表、双轴 code-review。v3.10.0（评分体系重构，Penguin 评测范式）：① 硬/软指标分域——软指标从扣分项改为报告项，总分只基于物理完整性+时效性+真损坏 ② 有效性协议——score_status 与分数正交 ③ 修复后验证——--fix 后硬分未提升则提示回滚。v3.11.0（遗忘治理引擎 + 检索增强）：① 新增 sb_forgetting 遗忘治理模块（规模×活跃度二维，active/warm/dormant 三档软切降权，dormant 0.5/warm 0.8/active 1.0，身份记忆豁免，forgetting status/scan/apply CLI）② 检索 entity 精确命中 boost——查询词命中记忆 entity 时优先召回，修复词面不重叠导致的漏召回 ③ 修复 v3.10.0 发布遗漏（sb_forgetting.py 未随包发布致 superbrain ImportError）。v3.11.1（DSH 审阅高位项修复）：① 门控容量持久执行——新增 _cap_enforce 执行器统一 get_active_workspace 与 chain_ignite 两条晋升路径，超容部分持久降级（可逆审计、无 override 残留），晋升洪水（95>cap50）根治 ② 自检索引格式兼容——check_file_integrity 兼容 v3.9.3+ 现行索引键（keyword_index/word_network_stats），file_integrity 假阳性消除 ③ find_duplicates TF-IDF 预计算——IDF doc_freq 表 + doc Counter 消除 O(n²·terms·doc_len) 退化（n=382 实测 ~235s→秒级，结果 bit 级一致）。v3.11.2（检索层重建，内部轮）：六通道 RRF 依据消融证据砍成 BM25 单路、_bm25_tokenize 修复 CJK 停用词主导、persona 合并单次检索（recall@1 0.200→0.700）、访问统计时点断裂修复、--dedupe 幂等写入开关。v3.12.0（P0-A→M 十四轮对抗性开发）：新增自动建图（graph build，entity 节点 + top-K scale-free 建边 + related_nodes 回填）、相对门控（get_threshold 双模式：meta 手动 / 默认自动=排名百分位，分布漂移免重标）、门控治理与写路径全量上锁、实体归一化、两轮对抗审阅修 6 处真 bug；实测检索 recall@1 0.200→0.700、门控洪水 137→50 根治、图谱 14→139 节点复活。v3.12.1（每日自检守护引擎，默认关闭）：新增 sb_healthlite.py L0 守护（graph build + selfcheck + 门控带内检查 → health_state.json，退出码分级 warn→0 / error→1、原子写 + 锁 pid 校验）+ schedule_manager.py（schtasks 用户级计划任务 install/uninstall/status，--time HH:MM 校验）；纯本地零 token 零联网，开关主通道=可视化工作台自动化组件面板（规划中，默认全关）。纯标准库零依赖。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.12.1
+# Super Brain (超脑) — 认知增强技能 v3.12.2
 
 ## 概述
 
@@ -324,6 +324,12 @@ SB memory auto-store --text "用户偏好使用TypeScript进行开发"
 > - 触发范围：技术调研、模型/工具学习、项目决策、用户偏好分享等
 > - **已由 superbrain.py 代码强制**：`memory add` / `longterm ingest` / `auto-store` 三个写入命令在执行时会校验「近期（30 分钟窗口内）是否做过 memory search」；未满足则拦截（exit 2，打印诊断）。需要显式豁免时在原命令后加 `--force`（会被写入审计，仅用于自动化 / 明确豁免场景）。检索状态存于 `DEFAULT_DATA_DIR/.hardstep.json`。
 
+> **🚨 会话开场待办检查（v3.12.2 M3-C，与硬步骤同级）**
+> 完成 `SB memory search` 召回后，检查 `~/.workbuddy/super-brain/pending_ai_review.md` 是否存在且修改时间在 48 小时内：
+> - **存在** → 主动读取，按其中 error 项逐项归因并给出修复方案（这是守护引擎 error 时自动落下的待办，用户无需转述）；
+> - **不存在或过期** → 跳过，零开销。
+> 该文件由 `sb_healthlite` 在体检 status=error 时原子写入、恢复 ok/warn 后自动清除——**不存在陈旧警报问题**，看到即处理。
+
 ### 2. 零成本检索（v3.0.0 新增）
 
 使用预计算的三进制哈希索引进行检索，无需全量扫描：
@@ -446,6 +452,59 @@ python schedule_manager.py uninstall    # 随时关闭
 
 - 开关主入口是**可视化工作台的自动化组件面板**（规划中，组件将全部默认关闭）；命令行是开发者兜底通道
 - Agent 侧：会话开场可读 `~/.workbuddy/super-brain/health_state.json`，**只有 `status=error` 才触发 L1 介入展开处理**；`warn` 只是面板提示，**不触发 L1**（token 契约：守护引擎对 warn 返回退出码 0，仅 error 返回 1）。同一 error issue 介入后应去重，避免每日重复触发
+
+### 10.2 L1 后台整合引擎（v3.12.2，**proposal→apply 两段式**）
+
+对标 Mem0 Dream / Zep 抽取管线 / LangMem Background / Letta sleep-time / A-Mem evolution 的**零 LLM 实现**（`sb_consolidate.py`）：三档规则式整合动作，后台只生成提案，**应用必须人工确认**。
+
+```bash
+python sb_consolidate.py --workspace X          # 生成 proposal（只读，dry-run）
+python sb_consolidate.py --workspace X --apply  # 人工确认后应用（自动备份+审计+哈希重算）
+python sb_healthlite.py --consolidate           # 每日守护时顺带出提案（永不自动 apply）
+```
+
+四档动作与铁律：
+
+| 档 | 动作 | 门槛 | 铁律 |
+|----|------|------|------|
+| A | general 实体归一 | 词表唯一命中（既有实体，频次≥3） | 黑名单实体/对话碎片/多实体歧义不提案；绝不新建实体 |
+| B | 同实体近重复合并 | simhash ≥ 0.80 | 碎片不整合；内容拼接不丢信息；被并方归档+replaced_by |
+| C | 冗长陈旧压缩 | >200字 & >30天 & ≥4句 & 压缩比≤50% | 抽取式确定性抽句（实体/数字/结论句优先）；原文在备份可回滚 |
+| D | 知识更新链（阶段2-B 时态） | 同句 mem_id 引用 + 更正标记词（更正/有误/supersedes…） | 三件套 superseded+replaced_by+valid_until（对齐原生 replaces）；纯引用/远处修正/相似带全部证伪排除 |
+
+- 设计依据：2026-08-30 整合负结果（碎片整合与纯去重零收益）——引擎四档全部避开证伪路径；「整合的收益在长期库卫生（防冗长累积/防 general 回潮），不在一次性召回提升」
+- D 档证伪记录（2026-08-31 生产 54 条提案实测）：「纯显式引用」把会话汇总/关联条全误报；「同实体 sim∈[0.45,0.80) + 全文任意更正词」精确率 ~7%（「修正权协议」的「修正」二字触发更正）。唯一可信证据=同句 ID+更正语义
+- 时态启用（阶段2-B）：add_memory 缺省锚定 valid_from=创建日期（零行为回归）；存量回填走 `superbrain-bench/backfill_valid_from.py`（生产 673 条已回填）
+- 组件注册：`~/.workbuddy/super-brain/automation_registry.json`（`background_consolidation` 组件，默认关闭，工作台面板契约）
+- 保守正确行为：200-350 字短冗长记录抽 3 句压不到一半，引擎主动放弃（「压不动不如不压」），卫生审计的「整合候选」数 ≠ 可压数
+
+### 10.3 本地工作台（M2 写通道 + C 端化，v3.12.2）
+
+`sb_workbench.py`——纯标准库单文件 HTTP 服务，把静态看板升级为**本地控制面**（方案 C；调研否决 Electron 壳「本机 9 类坑」与「发布为应用」云端沙箱碰不到本地文件）。**只绑 127.0.0.1**，零外部依赖。
+
+```bash
+python sb_workbench.py            # 127.0.0.1:8917，自动开浏览器
+双击 Start-Workbench.bat          # 无代码用户入口（ASCII+CRLF 防码页坑）
+```
+
+- **面板能力（C 端化改造，2026-08-31）**：三区 IA——①状态横幅（hero：一切正常/N 项提醒/还没体检过引导，含每条 issue 的人话解释与「立即体检」「打开健康看板」「交给 AI 深入检查」CTA）②自动打理（组件=服务话术，如「记忆库自动体检」；开关+下次时间+立即体检）③需要你决定（整理建议：看看建议明细 → 确认应用两步按钮；空态显示干净）。**两段式铁律升级**：apply 从「复制命令行」改为面板内显式二次确认（`POST /api/consolidate/apply`，白名单固定脚本，永不自动 apply）；「交给 AI」提示词由后端注入真实路径（health_state.json + latest_report.json），复制即用零占位符。机制语言→结果语言全量替换（守护引擎→自动体检、整合提案→整理建议）
+- **M3-A→v3 健康看板融合（双 Tab）**：`sb_dashboard.py`（M1 看板生成器内嵌版，严格只读）不再开新标签——工作台改双 Tab（`A 管家` / `B 记忆图谱`），图谱 Tab 以 `iframe /dashboard?embed=1` 隔离嵌入（懒加载，首次进入才请求；`?embed=1` 不注入工具条避免与宿主重复）+「↻ 重新生成数据」按钮（`POST /api/dashboard/refresh` 后强制重载快照）；独立访问 `/dashboard` 仍带工具条。产物落 `~/.workbuddy/super-brain/dashboard.html`
+
+### 10.4 正在推进看板（对话即上板，v3.12.2）
+
+面板第四区「正在推进」= 项目（状态徽章：进行中/待拍板/规划中/暂停/已完成，点击切换；**图钉置顶**；**↑↓ 排序**；**✎ 编辑现状 note**；**▾ 展开项目内任务清单**——含项目内联回车添加）+ 任务清单（checkbox、可选截止日期、逾期/7 天内到期置顶「今天要处理」高亮；无项目任务归「随手任务」组，已完成统一沉底）。数据落 `~/.workbuddy/super-brain/workbench_board.json`（首次读取自动播种真实项目；原子写；损坏自动 .corrupt.bak 备份后重播种）。
+
+**实时同步**：面板每 5s 轻量轮询 `GET /api/board/poll`（只读 board、零子进程），`updated_at` 变化即局部刷新看板区——Agent 写文件 → 面板 ≤5s 反映；输入聚焦/编辑态自动跳过本轮应用，不打断操作。
+
+**对话即上板（Agent 侧约定）**：对话中用户提到新任务、项目状态变化、截止日期 → 收尾时直接更新 `workbench_board.json`（schema：`{version, updated_at, projects:[{id,name,status,note,pinned,updated_at}], tasks:[{id,title,project,done,due}]}`；id 用 `t_`/`p_`+8 位 hex；due 仅 `YYYY-MM-DD` 或 null；保持原子写与字段长度：title≤120/name≤40/note≤200）。面板 CRUD 走 `POST /api/board`（action: add_task/toggle_task/del_task/add_project/update_project/del_project/move_project/toggle_pin，单端点分发，写动作仅限 board 文件）。
+
+```bash
+python sb_workbench.py            # 127.0.0.1:8917，自动开浏览器
+双击 Start-Workbench.bat          # 无代码用户入口（ASCII+CRLF 防码页坑）
+```
+- **意图/现实分离**：开关写 automation_registry.json（意图权威源），schtask/health_state 只读展示
+- `schedule_manager.py` 同步升级 registry 组件驱动：`--task <component_id>` 装卸任意组件；任务命令行**带 `--workspace`**（修复 v3.12.1 洞：schtasks 触发时无环境变量，healthlite 会跑在 default 空库）
+- 全链路已实测：toggle ON → schtasks 真装（TR 含 --workspace）→ run-now exit 0 → toggle OFF → 终态默认关
 
 ## v3.0.0 技术细节
 
@@ -698,6 +757,7 @@ input_schema:
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.12.2** | **2026-08-31** | **工作台全线（写通道+看板+C 端化）+ 阶段2 整合/时态 + 图谱消融：** ① **新增 `sb_consolidate.py`**——零 LLM 后台整合（对标 Mem0 Dream / Zep / LangMem / Letta / A-Mem 五家共性能力）：A 档 general 实体词表唯一命中归一（黑名单+碎片+歧义排除，绝不新建实体）、B 档同实体近重复合并（sim≥0.80，碎片不整合）、C 档冗长陈旧抽取式压缩（>200字&>30天&压缩比≤50%，压不动不如不压）、D 档知识更新链（同句 mem_id 引用+更正标记→superseded 三件套，对齐原生 replaces 语义）；后台只出 proposal **永不自动 apply**；apply 前缀断言+备份（%H%M 防同日覆盖）+审计+哈希重算。② **阶段2-B 时态启用**——add_memory 缺省锚定 valid_from=创建日期；存量回填 `backfill_valid_from.py`（生产 673 条）；D 档实测：54→2 条真更正链落地（v3.7.2 发布误记、unknowns 原稿误记），软失效设计被 selfcheck temporal_validity 打回后改对齐原生语义。③ **新增 `sb_workbench.py` 本地工作台**（方案 C：纯标准库 HTTP 服务只绑 127.0.0.1）——**C 端化三区 IA**（深色 hero 横幅+人话体检解释+服务话术卡+整理建议两步应用 `/api/consolidate/apply`+AI 提示词真实路径注入）、**正在推进看板**（对话即上板：`workbench_board.json`+`/api/board` 八 action+图钉置顶/↑↓排序/项目内展开任务/编辑现状/5s 轻量轮询实时同步）、**体检历史趋势**（`_append_history` cap 90 条+trendSvg）、**M3-A 健康看板迁入**（`sb_dashboard.py` 只读内嵌+`/dashboard` 托管）、**M3-C AI 待办自动化**（error 自动落 `pending_ai_review.md`、恢复自动清除，会话开场检查约定）；UI 对标 a1m1ng.cn v8 白盒子画廊语言（mono 编号/衬线标题/深色卡/朱砂红强调）。④ **图谱增益消融**——E1 检索增益 0（by design）/E2 门控 10 席 entanglement 驱动，一阶段「差三项」全关闭。⑤ **328 条无审计 override 已清除**（候选池 225→563，晋升 8.9% 带内）。⑥ **生产实测**——A×1+C×20+D×2；30 题 recall@5 0.933 持平零回归；test_consolidate 26 用例全绿；工作台全链路（toggle/体检/apply/看板 CRUD/置顶排序/轮询）实测通过。 |
 | **v3.12.1** | **2026-08-31** | **每日自检守护引擎（可选，默认关闭）+ 交叉审计修复收尾：** ① **新增 L0 守护**——`sb_healthlite.py`（graph build + selfcheck + 门控带内只读检查 → `health_state.json`；退出码分级 warn→0 / error→1 保 token 契约；状态文件原子写 `tmp.{pid}`+`os.replace`；锁文件 30min TTL + 释放前 pid 校验防误删；--time/--keep 校验；report 治理只读目录）。② **新增计划任务管理**——`schedule_manager.py`（Windows schtasks 用户级任务 install/uninstall/status，--time HH:MM 校验、uninstall 区分「任务不存在」、GBK 码页容错；POSIX 打印 cron 行）。③ **开关策略**——默认全关，主通道=可视化工作台自动化组件面板（规划中），CLI 为开发者兜底；Agent 仅 `status=error` 触发 L1 介入，warn 仅面板提示。④ **质量过程**——切换模型三代理并行对抗性审计（审计 C）发现 P0×2+P1×5 全部修复并独立验证；全链路实测（首跑 5.4s / build 幂等 / warn 正确分级）。纯标准库零依赖。 |
 | **v3.12.0** | **2026-08-31** | **检索层重建 + 图谱复活 + 相对门控（P0-A→M 十四轮对抗性开发）：** ① **检索层重建（v3.11.2 内部轮并入）**——消融证明六通道 RRF 被三路噪声拖垮（simhash/ternary ≈ 随机基线），砍成 BM25 单路；新增 `_bm25_tokenize`（CJK bigram+trigram、unigram 降权 ×0.35）修复停用词主导排序；persona 与 project 合并单次检索修量纲污染（30 题 recall@1 0.200→0.700）；访问统计时点断裂修复（`access_tracking_cutoff_ts`）；`--dedupe` 幂等写入开关（0.95 阈值标定，默认关）。② **新增自动建图**——`sb_graph.build_from_memories` + CLI `graph build`（--dry-run/幂等/写锁）：entity 节点、实体伪文档库级 IDF 余弦、top-K+地板 scale-free 建边、related_nodes 回填（合并不覆盖推理链记忆 ID）、只为有边实体建节点；图谱 14→139 节点复活，entanglement 信号恢复。③ **相对门控（scale-free）**——`get_threshold` 双模式：meta 显式=手动（persona=0.35 身份常驻），默认自动=阈值取 salience 排名第 k 高（k=min(cap, round(候选池×0.15))），分布漂移免重标（终结一天三标）；CLI `gating threshold --auto`；排名制对 confidence 偏移量免疫。④ **治理与健壮**——add_memory 写入路径事件驱动容量执行（晋升洪水 137→50 根治）、门控四写函数全量上锁（并发丢写面封堵）、实体归一化工具（general 16.9%→8.9%）、calibrate/post_build_promotion 候选池口径统一。⑤ **质量过程**——两轮对抗性审阅（P0-K/M）修 6 处真 bug（persona 结构性死锁、无锁建图、陈旧标志、门控零锁、诊断口径）；新增 test_graph_build(18)/test_relative_gating(15)；12 套件回归全绿，交付层评测 recall@5 0.933/mrr 0.807 基线持平。注：328 条无审计历史 demote override 的清除待用户拍板（不影响发布）。 |
 | **v3.11.1** | **2026-08-20** | **门控容量持久执行 + 自检索引格式兼容（DSH 审阅高位项）：** ① 新增 sb_gating._cap_enforce 容量执行器，get_active_workspace 与 chain_ignite 统一过闸——旧版 cap 截断只截返回值不回写，workspace_promoted 标志只增不减（95>50）致 gating_flood_protection 持续 CRITICAL；现在超容部分持久降级（可逆审计、无 override、链为单位保留）。② check_file_integrity 兼容 v3.9.3+ 现行索引键（keyword_index/word_network_stats），消除 file_integrity 假阳性（Score Status 误报 INVALID）。③ 并入 v3.11.0 发布后未打包的 find_duplicates TF-IDF 预计算性能修复（~235s→秒级）④ test_prepublish_strip 夹具脱敏（GitHub Phase 1 发布审查零命中）。回归：test_v36 新增 T8 容量回归 5 项（36→41）。 |

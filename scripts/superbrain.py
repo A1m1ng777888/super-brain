@@ -232,7 +232,12 @@ def cmd_memory_get(args):
 
 def cmd_memory_search(args):
     """Search memories."""
-    results = search(args.query, limit=args.limit)
+    # v3.12.2 (access 统计恢复)：用户主动检索路径显式开启访问计数——
+    # v3.9.5 起 update_access_stats 默认关闭且无调用方传 True，导致
+    # 2026-08 后创建的记忆 access_count 恒为 0（v3.11.2 仅做了断裂
+    # 时点止损）。此处恢复 CLI+MCP 两条用户路径的计数；评测器走进程内
+    # sb_memory.search() 默认 False，统计不被污染。
+    results = search(args.query, limit=args.limit, update_access_stats=True)
     mark_search_done(args.query)  # B4: 传查询内容，供 enforce_hard_step_guard 相关性校验
     if not results:
         print("No matching memories found.")
@@ -993,7 +998,10 @@ def cmd_memory_learn_expr(args):
 
 def cmd_memory_search_corrected(args):
     """Search with automatic typo correction."""
-    results = search_with_correction(args.query, limit=args.limit, workspace=args.workspace)
+    # v3.12.2 (access 统计恢复)：与 cmd_memory_search 同口径，用户主动检索计数
+    results = search_with_correction(args.query, limit=args.limit,
+                                     workspace=args.workspace,
+                                     update_access_stats=True)
     if not results:
         print("No matching memories found.")
         return

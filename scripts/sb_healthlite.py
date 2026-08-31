@@ -50,6 +50,10 @@ import sb_core                                    # noqa: E402
 import sb_gating                                  # noqa: E402
 import sb_graph                                   # noqa: E402
 import sb_selfcheck                               # noqa: E402
+try:
+    import sb_consolidate                          # noqa: E402  L1 整合（可选）
+except Exception:                                  # pragma: no cover
+    sb_consolidate = None                          # 独立部署缺文件时不拖垮 L0
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -114,6 +118,91 @@ def _release_lock(path, pid):
             pass
 
 
+def _history_path():
+    return os.path.join(sb_core.DEFAULT_DATA_DIR, "health_history.json")
+
+
+def _pending_review_path():
+    return os.path.join(sb_core.DEFAULT_DATA_DIR, "pending_ai_review.md")
+
+
+def _sync_pending_review(state):
+    """v3.12.2 (M3-C「AI 深入检查」自动化版)：error 写 AI 待办，恢复即清除。
+
+    token 契约：纯本地文件（0 token），L1 Agent 在会话开场发现此文件后
+    主动深入检查（约定见 SKILL.md 硬步骤节）——不唤醒、不推送、不轮询。
+    与状态文件同原子写策略；写/删失败静默（待办是增强，不是关键路径）。
+    """
+    p = _pending_review_path()
+    try:
+        if state.get("status") == "error":
+            issues = state.get("issues") or []
+            lines = [
+                "# 超脑 L1 待办：体检发现 error，请深入检查",
+                "",
+                f"- 体检时间：{state.get('timestamp')}",
+                f"- 工作区：{state.get('workspace')}",
+                f"- 体检结果：{sb_core.DEFAULT_DATA_DIR}{os.sep}health_state.json",
+                f"- 深度自检报告：{sb_core.get_health_dir()}{os.sep}latest_report.json",
+                "",
+                "## error 项（需修复）",
+            ]
+            for i in issues:
+                if i.get("severity") == "error":
+                    lines.append(f"- **{i.get('check')}**：{(i.get('detail') or '')[:200]}")
+            lines += [
+                "",
+                "## 处理要求",
+                "",
+                "逐项归因：定位根因 → 给出修复步骤 → 修复后重跑",
+                "`python sb_healthlite.py --workspace <工作区>` 验证恢复 ok/warn。",
+                "本文件在体检恢复非 error 后会自动清除。",
+            ]
+            tmp = f"{p}.tmp.{os.getpid()}"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            os.replace(tmp, p)
+        elif os.path.exists(p):
+            os.remove(p)  # 恢复 ok/warn：待办自动消失，不留陈旧警报
+    except OSError:
+        pass
+
+
+def _append_history(state):
+    """v3.12.2-dev (P3 趋势)：每次运行追加一条体检摘要，cap 90 条（≈3 个月）。
+
+    与 state 文件同原子写策略；历史文件缺失/损坏视为空重建（趋势数据允许
+    丢，不值得备份恢复）；写失败静默——历史是锦上添花，绝不影响守护本体。
+    """
+    h_path = _history_path()
+    try:
+        with open(h_path, encoding="utf-8") as f:
+            hist = json.load(f)
+        if not isinstance(hist, list):
+            hist = []
+    except (OSError, json.JSONDecodeError):
+        hist = []
+    gb = state.get("graph_build") or {}
+    hist.append({
+        "ts": state.get("timestamp"),
+        "status": state.get("status"),
+        "n_issues": len(state.get("issues") or []),
+        "n_err": len([i for i in (state.get("issues") or [])
+                      if i.get("severity") == "error"]),
+        "new_nodes": gb.get("new_nodes"),
+        "new_edges": gb.get("new_edges"),
+        "duration_sec": state.get("duration_sec"),
+    })
+    hist = hist[-90:]
+    try:
+        tmp = f"{h_path}.tmp.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(hist, f, ensure_ascii=False)
+        os.replace(tmp, h_path)
+    except OSError:
+        pass
+
+
 def _gating_readonly(workspace):
     """只读复算门控状态（抄 build_dashboard 口径，不触发重门控写盘）。"""
     mems = sb_core.read_memories(workspace)
@@ -155,8 +244,13 @@ def _cleanup_old_reports(keep=30):
         pass
 
 
-def run(workspace=DEFAULT_WORKSPACE, quiet=False):
-    """主流程：build → selfcheck → 门控检查 → 状态文件。返回 (exit_code, state)。"""
+def run(workspace=DEFAULT_WORKSPACE, quiet=False, consolidate=False):
+    """主流程：build → selfcheck → 门控检查 → 状态文件。返回 (exit_code, state)。
+
+    v3.12.2-dev：consolidate=True 时追加 L1 整合提案生成（只读，**永不
+    自动 apply**——两段式铁律：后台只出 proposal，应用须经人工确认走
+    sb_consolidate --apply）。提案计数进 health_state.json，面板可见。
+    """
     t0 = time.time()
     issues = []
     state = {
@@ -233,6 +327,38 @@ def run(workspace=DEFAULT_WORKSPACE, quiet=False):
                        "detail": f"{type(e).__name__}: {e}"})
 
     # ---- 判定与落盘 ----
+    # ---- 4. L1 整合提案（可选；只读生成，不 apply） ----
+    if consolidate:
+        if sb_consolidate is not None:
+            try:
+                prop = sb_consolidate.generate_proposals(workspace)
+                acts = prop.get("actions", {})
+                state["consolidation"] = {
+                    "mode": "proposal_only",
+                    "entity_reassign": len(acts.get("entity_reassign", [])),
+                    "similar_merge": len(acts.get("similar_merge", [])),
+                    "verbose_compress": len(acts.get("verbose_compress", [])),
+                    "supersede": len(acts.get("supersede", [])),
+                    "proposal_path": os.path.join(
+                        sb_core.get_workspace_dir(workspace),
+                        "consolidation_proposals.json"),
+                }
+                if any(state["consolidation"][k] for k in
+                       ("entity_reassign", "similar_merge",
+                        "verbose_compress", "supersede")):
+                    issues.append({
+                        "check": "consolidation_pending", "severity": "warn",
+                        "detail": (f"整合提案待处理：A×{state['consolidation']['entity_reassign']} "
+                                   f"B×{state['consolidation']['similar_merge']} "
+                                   f"C×{state['consolidation']['verbose_compress']} "
+                                   f"D×{state['consolidation']['supersede']}（proposal 已生成，"
+                                   f"人工确认后 sb_consolidate --apply）")})
+            except Exception as e:  # noqa: BLE001
+                issues.append({"check": "consolidation", "severity": "error",
+                               "detail": f"{type(e).__name__}: {e}"})
+        else:
+            state["consolidation"] = {"mode": "unavailable"}
+
     if any(i["severity"] == "error" for i in issues):
         state["status"] = "error"
     elif issues:
@@ -248,6 +374,12 @@ def run(workspace=DEFAULT_WORKSPACE, quiet=False):
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, state_path)
+
+    # v3.12.2-dev (P3)：体检历史追加（趋势数据源，写失败不影响守护）
+    _append_history(state)
+
+    # v3.12.2 (M3-C)：error 写 AI 待办文件 / 恢复自动清除（token=0）
+    _sync_pending_review(state)
 
     # v3.12.1 (审计 P0-2)：退出码分级——warn 返回 0（不触发 L1），
     # 只有 error 返回 1。token 契约：L1 仅响应 error，warn 只是面板提示。
@@ -269,6 +401,8 @@ def main():
     ap.add_argument("--workspace", default=DEFAULT_WORKSPACE)
     ap.add_argument("--quiet", action="store_true",
                     help="计划任务模式：正常时零输出")
+    ap.add_argument("--consolidate", action="store_true",
+                    help="追加 L1 整合提案生成（只读，永不自动 apply）")
     args = ap.parse_args()
 
     lock = _acquire_lock()
@@ -277,7 +411,8 @@ def main():
             print("[sb_healthlite] 已有实例在运行（锁未过期），跳过本次")
         return 0
     try:
-        code, _ = run(args.workspace, quiet=args.quiet)
+        code, _ = run(args.workspace, quiet=args.quiet,
+                      consolidate=args.consolidate)
         return code
     finally:
         _release_lock(lock, os.getpid())

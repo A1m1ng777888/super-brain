@@ -163,6 +163,17 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
         memories = read_memories(workspace)
     config = load_config()
 
+    # v3.12.2（阶段2-B 时态启用）：valid_from 缺省锚定创建日期。
+    # 动机：字段与冲突检测/过期降权（×0.85）机制 v2.1.0 就在，但生产库
+    # 全量 valid_from=None——时态层整体休眠。默认锚定后：
+    #   - 同 entity+type 的时间重叠检查（需要双方都有 valid_from）真正生效；
+    #   - 每条记忆有「生效起点」，supersede 链（valid_until）有可对齐的锚。
+    # 风险面：valid_from 单独存在不触发任何检索惩罚（惩罚只看 valid_until），
+    # 零行为回归。存量记忆由 backfill_valid_from.py 一次性回填。
+    if valid_from is None and config.get("temporal", {}).get("enabled", True):
+        from datetime import datetime as _dt  # 本文件 datetime 均为函数内局部导入，此处保持同风格
+        valid_from = _dt.now().strftime("%Y-%m-%d")
+
     # Merge default attributes with provided ones
     default_attrs = TYPE_DEFAULTS.get(mem_type, {}).copy()
     if attributes:
@@ -1201,7 +1212,7 @@ def get_expression_profile(workspace=None):
     return profile
 
 
-def search_with_correction(query, limit=10, workspace=None):
+def search_with_correction(query, limit=10, workspace=None, update_access_stats=False):
     """
     Search with automatic typo/wording correction.
     
@@ -1218,11 +1229,13 @@ def search_with_correction(query, limit=10, workspace=None):
     corrected_query = correction_result["corrected"]
     
     # Search with corrected query
-    results = search(corrected_query, limit=limit, workspace=workspace)
+    results = search(corrected_query, limit=limit, workspace=workspace,
+                     update_access_stats=update_access_stats)
     
     # If corrections were made, also search with original query
     if correction_result["corrections"]:
-        original_results = search(query, limit=limit, workspace=workspace)
+        original_results = search(query, limit=limit, workspace=workspace,
+                                  update_access_stats=update_access_stats)
         
         # Merge: add original results that aren't already in corrected results
         existing_ids = {r[0]["id"] for r in results}

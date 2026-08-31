@@ -1,5 +1,79 @@
 # Changelog — Super Brain 超脑
 
+## v3.12.2 (2026-08-31) — 工作台全线（写通道+看板+C 端化）+ 阶段2 整合/时态 + 图谱消融
+
+### 新增 — 本地工作台 C 端化改造（产品视角，下午增量）
+
+- **三区信息架构**：状态横幅（hero，深色作品卡）→ 自动打理（组件=服务话术）→ 需要你决定（整理建议两步应用）→ 正在推进（项目+任务看板）；机制语言→结果语言全量替换（守护引擎→自动体检、整合提案→整理建议）
+- **人话映射层**：`ISSUE_COPY`（11 类体检 issue → 标题+说明）、`_KIND_LABEL`（4 类建议分型）、`SERVICE_DISPLAY`（服务话术）；`api_state` 输出 `health_friendly`/`services`/`copy.ai_prompt`
+- **两步应用通道（D1-B）**：整理建议从「复制命令行」升级为面板内「看看建议 → 确认应用」（`POST /api/consolidate/apply` 白名单固定脚本）；**两段式铁律不变**——永不自动 apply，显式确认=人工通道
+- **真实路径注入**：「交给 AI 深入检查」提示词由后端注入 health_state.json + latest_report.json 真实路径，复制即贴即用（消灭 `<用户>` 占位符）
+- **空状态引导**：never_ran → 「做第一次体检」单一 CTA（空状态三要素）
+- **体检历史趋势（P3）**：`sb_healthlite._append_history`（每次运行追加摘要，cap 90 条，原子写，失败静默）+ 面板 trendSvg 微趋势（30 根竖条：颜色=结果、高度=提醒数、悬停详情）
+
+### 新增 — 正在推进看板（对话即上板）
+
+- 面板第四区：项目（状态徽章点击循环/图钉置顶/↑↓ 排序/✎ 编辑现状/▾ 展开项目内任务清单+内联回车添加）+ 任务清单（checkbox/可选截止日期/逾期与 7 天内到期「今天要处理」置顶高亮）+ 随手任务组
+- **对话即上板**：Agent 收尾直接写 `~/.workbuddy/super-brain/workbench_board.json`（首次播种真实项目，原子写，损坏 .corrupt.bak 重播种）；面板每 5s 轻量轮询 `GET /api/board/poll`（只读 board 零子进程），`updated_at` 变化局部刷新——Agent 写文件 → 面板 ≤5s 反映，输入聚焦/编辑态自动跳过
+- API：`POST /api/board` 单端点八 action（add/toggle/del_task、add/update/move_project/toggle_pin/del_project），输入校验（空标题拦截/非法日期置空/长度上限）
+
+### UI — 白盒子画廊语言（对标 a1m1ng.cn v8 设计 token）
+
+- 深色作品卡 hero（#1a1917 底暖白字琥珀 kicker）、mono 编号区块标题（01/02/03+朱砂红编号+细线）、衬线 900 标题（Noto Serif SC 栈）、卡片 16px 圆角+hover 抬升、徽章 mono 化
+- 朱砂红 #b84525（源自 v8）作为决策/逾期强调色引入；超脑琥珀压深 #D98A1F 提对比；两色分工：琥珀=行动/进行中，朱砂=需要决策/逾期
+- 零外部依赖不变：系统字体栈 fallback、内联 SVG 图标、断网可用
+
+### 新增 — M3-A 健康看板迁入
+
+- `sb_dashboard.py`（M1 看板生成器内嵌版，严格只读）+ 面板「打开健康看板」→ `GET /dashboard` 托管（首次访问现场生成 ≈1s，注入重新生成/返回工具条）+ `POST /api/dashboard/refresh`
+
+### 修复
+
+- **M2 过程缺陷**：sb_consolidate apply 后 proposal 文件不刷新 → 面板挂陈旧提案（apply 尾部自动重生成，26 用例回归全绿）
+- v3.12.1 洞：schtasks 计划任务命令行缺 `--workspace`（触发时跑在 default 空库）——现从 registry 读 workspace 写死进任务
+
+### 新增 — L1 后台整合引擎（sb_consolidate.py）
+
+- **零 LLM、零 token** 的后台记忆整合（对标 Mem0 Dream / Zep 抽取管线 / LangMem Background / Letta sleep-time / A-Mem evolution 五家共性能力，阶段2「补差距」最高优先项）
+- **proposal→apply 两段式铁律**：后台（healthlite `--consolidate`）只生成提案清单 `consolidation_proposals.json`，**永不自动 apply**；应用走 `sb_consolidate --apply` 人工确认通道
+- 四档动作：A=general 实体词表唯一命中归一（黑名单实体/对话碎片/多实体歧义排除，绝不新建实体）；B=同实体近重复合并（simhash≥0.80，碎片不整合，内容拼接不丢信息）；C=冗长陈旧抽取式压缩（>200字 & >30天 & ≥4句 & 压缩比≤50%）；D=知识更新链（同句 mem_id 引用+更正标记 → superseded+replaced_by+valid_until 三件套，对齐原生 replaces 语义）
+- 安全设计：前缀断言防索引错位、apply 前自动备份（**%H%M 防同日覆盖**）、审计日志 reversible=True、simhash/ternary 哈希随修改重算
+- 保守正确行为：200-350 字短冗长记录抽 3 句压不到一半 → 主动放弃（「压不动不如不压」）
+
+### 新增 — 时态建模启用（阶段2-B）
+
+- `add_memory` 缺省锚定 `valid_from = 创建日期`（v2.1.0 的时态机器首次全线激活：同 entity+type 时间重叠检查真正生效；valid_from 单独存在零行为回归）
+- 存量回填 `superbrain-bench/backfill_valid_from.py`（dry-run/apply/备份；生产 673 条已回填）
+- D 档触发规则经生产校准：**同句 ID+更正语义**是唯一可信证据；「纯显式引用」（会话汇总/关联误报）与「同实体相似带+全文更正词」（精确率 ~7%，「修正权协议」误触发）两条路径实测证伪并删除
+- D 档语义校准：初版「软失效」（active+valid_until 走 ×0.85 过期降权）被 selfcheck temporal_validity 打回——valid_until 本义是用户声明有效期，「被更正」应走 superseded 硬失效通道（与 --replaces 原生语义对齐）
+
+### 新增 — automation_registry.json（工作台组件契约）
+
+- `~/.workbuddy/super-brain/automation_registry.json`：daily_health_lite + background_consolidation 两组件，**默认全关**，schema 依《超脑自动化守护设计方案_20260831》
+
+### 新增 — 本地工作台 M2 写通道（sb_workbench.py + Start-Workbench.bat）
+
+- 方案 C 落地（调研否决 Electron 壳/云端发布）：纯标准库单文件 HTTP 服务，**只绑 127.0.0.1**，面板=组件开关（写 registry 意图+真装卸 schtasks）/立即检查/引擎状态灯/issues 展开/「让 AI 深入检查」剪贴板提示词/整合提案摘要（只读，永不自动 apply）
+- `schedule_manager.py` 升级 registry 组件驱动（`--task <id>`，向后兼容）；**修复 v3.12.1 洞：计划任务命令行现带 `--workspace`**（此前 schtasks 触发会跑在 default 空库）
+- registry 契约扩展：组件增 `enabled`（用户意图）与 `implementation.workspace` 字段
+- 全链路实测：toggle ON→schtasks 真装（TR 含 --workspace，下次运行 2026/9/1 08:30）→立即检查 exit 0→toggle OFF→终态默认关
+
+### 新增 — 图谱增益消融（阶段3 验证第一项）
+
+- `superbrain-bench/graph_gain_ablation.py`（同进程 A/B 零写盘）：E1 检索消融——30/30 题 top-5 一致，**图谱检索增益=0（by design，BM25 单路时代图谱不在检索热路径）**；E2 门控消融——50 席晋升集 10 席由 entanglement 项驱动（重合率 0.8），带图集 ent 均值 4.92 vs 全库 3.88，核心主题簇（超脑/TencentDB/tabbit）被系统性推入工作空间
+- 一阶段「到上游差三项」至此全部关闭（后台整合/时态建模/图谱增益消融）
+
+### 变更 — 328 条无审计 gating override 清除（v3.12.0 遗留待办闭环）
+
+- 全库 362 条 override 全为 demote 且 audit manual=0（不可溯源）；清除后候选池 225→563、晋升 8.9%（带内）、selfcheck 无新 issue
+- 备份：`memories.json.bak_20260831_clear_override`；清单：`superbrain-bench/results/clear_overrides_20260831.json`
+
+### 生产实测（workspace=本地知识库）
+
+- A×1（求职）+ B×0 + C×20（6412 字压缩）+ D×2（v3.7.2 发布误记、unknowns 原稿误记 supersede 链）应用；图谱 140 节点/276 边、general 48、整合候选 71→55
+- 30 题交付分：recall@5 **0.933 三连持平零回归** / mrr 0.808→0.792（仅「Skill 分档」单题 rank 1→2，仍命中）
+- test_consolidate.py **26 用例全绿**（A/B/C/D 四档 + 只读保证/断言失败隔离/幂等性/截断 ID 解析/同句更正语义）
+
 ## v3.12.1 (2026-08-31) — 每日自检守护引擎（可选，默认关闭）+ 交叉审计修复收尾
 
 ### 新增 — L0 守护引擎（sb_healthlite.py）
