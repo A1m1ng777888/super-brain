@@ -1,5 +1,34 @@
 # Changelog — Super Brain 超脑
 
+## v3.12.1 (2026-08-31) — 每日自检守护引擎（可选，默认关闭）+ 交叉审计修复收尾
+
+### 新增 — L0 守护引擎（sb_healthlite.py）
+
+- 每日自动 `graph build`（新记忆进工作空间的前提）+ selfcheck + 门控带内只读检查 → `health_state.json`，供 Agent 异常时感知
+- **退出码分级**：正常/warn → 0、仅 error → 1（token 契约：守护引擎每月 0-2 次触发不烧 token，warn 不击穿）
+- 状态文件**原子写**（`tmp.{pid}` + `os.replace`，崩溃只留 tmp 残留绝不损坏状态文件）
+- 锁文件 30min TTL + 释放前 **pid 校验**（防误删他人新锁）
+- report 治理：只读目录按 mtime 保留最近 N 份（135→31 清理示例）
+
+### 新增 — 计划任务管理（schedule_manager.py）
+
+- Windows：schtasks 用户级任务 install/uninstall/status（无需管理员）；POSIX 打印 cron 行
+- `--time HH:MM` 格式校验（00:00~23:59）；uninstall 区分「任务不存在」（非 0 不误报）
+- 中文 Windows schtasks 输出 GBK 码页容错（encoding=mbcs）
+
+### 开关策略
+
+- **默认全关**：install 必须显式执行；开关主通道=可视化工作台自动化组件面板（规划中），CLI 为开发者兜底
+- Agent 侧：仅 `status=error` 触发 L1 介入；warn 仅面板提示（去重避免每日重复触发）
+
+### 收尾（审计 C 交叉验证后）
+
+- SKILL.md 新增 §10.1「可选：每日自检守护（默认关闭）」
+- v3.12.0 CHANGELOG 段回流本地（发布时只入 clone-temp）
+- 全链路实测：首跑 5.4s / graph build 幂等（backfilled 8 条）/ warn 正确分级 rc=0
+
+---
+
 ## v3.12.0 (2026-08-31) — 检索层重建 + 图谱复活 + 相对门控（P0-A→M 十四轮）
 
 ### 新增 — 自动建图
@@ -39,7 +68,6 @@
 - 12 套件回归全绿；交付层评测 30 题真实中文问句 recall@5 0.933 / mrr 0.807
 
 ---
-
 
 ## v3.11.1 (2026-08-20) — 门控容量持久执行 + 自检索引格式兼容（DSH 审阅高位项）
 

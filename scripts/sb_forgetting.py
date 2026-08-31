@@ -7,7 +7,7 @@ SuperBrain Forgetting Engine v1.0.0 — 遗忘治理模块
 设计来源：
 - 2026-08-11 深度研究「潜意识·Subconscious」后借鉴其遗忘曲线概念，
   但检索算法保持超脑原生（实验 1 证明中文场景不能退回标签匹配）。
-- 真实数据校准：portfolio-网站(174条/39天不活跃)、产投(85条/22天不活跃)
+- 真实数据校准：某展示型工作空间(174条/39天不活跃)、某业务型工作空间(85条/22天不活跃)
   应落 dormant，规模大但不活跃 = 最高遗忘收益。
 
 三层档位：
@@ -44,8 +44,8 @@ K_ACCESS_FREQ = 10         # 访问频率归一化除数
 
 DORMANT_DAYS = 45          # 项目最后访问中位数超过 45 天 → 时间分归零（dormant 界）
                            # 校准依据（2026-08-11 真实数据）：
-                           #   portfolio-网站 全空间 last_accessed 34-46 天 → warm/dormant 交界
-                           #   AAA本地知识库v1 活跃至今 → active
+                           #   某长期未访问工作空间 last_accessed 34-46 天 → warm/dormant 交界
+                           #   某高频工作空间 活跃至今 → active
 ACTIVE_DAYS = 14           # 项目最后访问中位数 <= 14 天 → 时间分满分
 
 TIER_ACTIVE_MIN = 0.40     # A >= 0.40 → active
