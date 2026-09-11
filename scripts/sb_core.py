@@ -22,7 +22,10 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 )
 
 # v3.9.4: 单一版本号来源（修复 DEFAULT_CONFIG/三处兜底四处漂移的审阅 P1-4）
-VERSION = "3.12.1"
+# v3.13.0: 同步 bump（此前停留在 3.12.1，落后 SKILL.md 三个小版本）
+VERSION = "3.13.1"
+# v3.13.1: 发布日期同样单点化（此前 `version` 子命令硬编码 2026-08-06，随版本一起漂移）
+RELEASE_DATE = "2026-09-11"
 
 # v3.9.5 P2-9: warmup 常量统一来源（消除 sb_reasoning/sb_entanglement 重复定义）
 WARMUP_MEMORY_THRESHOLD = 15
@@ -326,12 +329,62 @@ def write_json(path, data):
     B6 修复 (2026-07-10): 原子写——先写 .tmp 再 os.replace，避免写入过程崩溃导致文件损坏。
     os.replace 是跨平台原子操作 (Windows/Linux/macOS 均支持)，崩溃时 .tmp 残留但不污染原文件。
     v3.9.5 P1-6: tmp 名加 PID——双进程同 workspace 并发写时避免共用 .tmp 互踩。
+
+    v3.13.1 (2026-09-11) Windows 降级路径：
+      os.replace 在目标文件被并发读者持有句柄时**必然**抛 PermissionError(WinError 5)
+      ——实测 100/100。且三条替代路均被实测否决：
+        ① 读者改用 FILE_SHARE_DELETE 打开：仍 100/100 失败（CreateFileW err=0，模式生效但无帮助）；
+        ② 写入端重试：读者持续持有时 100/100 失败，且耗时从 0.38s 膨胀到 50s；
+        ③ 消除读路径：读操作本就不该加锁（search/list/外部客户端并发读），不可行。
+      故保留原子写为快路径，冲突时降级为「备份 → 原地覆盖 → 写后校验」，校验失败则回滚。
+      降级写丢失原子性，但所有写事务都在 workspace_lock 内串行执行，不存在并发写者；
+      无锁读者有极小概率读到半截，read_json 会告警并返回 None（不写回，无清库风险）。
     """
     ensure_dir(os.path.dirname(path))
     tmp_path = f"{path}.tmp.{os.getpid()}"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, path)  # 原子重命名
+
+    try:
+        os.replace(tmp_path, path)  # 原子重命名（快路径）
+        return True
+    except PermissionError:
+        return _write_json_degraded(path, data, tmp_path)
+
+
+def _write_json_degraded(path, data, tmp_path):
+    """os.replace 被读句柄阻塞时的降级写：备份 → 覆盖 → 校验 → 失败回滚。
+
+    直接 open(path, "w") 能够穿过读句柄（实测 0/100 失败）——因为内置 open 的
+    共享模式是 FILE_SHARE_READ|FILE_SHARE_WRITE，不禁止他人以 GENERIC_WRITE 打开；
+    被禁止的只有需要重命名/DELETE 语义的 os.replace。
+    """
+    backup = None
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                backup = f.read()
+        except (IOError, OSError, UnicodeDecodeError):
+            backup = None
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        with open(path, "r", encoding="utf-8") as f:
+            json.load(f)  # 写后校验：确认落盘内容可解析
+    except Exception:
+        if backup is not None:
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(backup)
+            except Exception:
+                pass
+        raise
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
     return True
 
 

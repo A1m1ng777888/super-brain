@@ -1,2 +1,21 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+
+# 本地备份与快照（不应入库）
+_bak_*/
+*.bak
+*.bak_*
+*.tmp.*
+*~
+
+# 测试/冒烟残留
+sb_smoke_*/
+
+# 运行时数据（记忆库、图谱、配置）
+config.json
+workspaces/
+health/
+health_state.json
+*.log

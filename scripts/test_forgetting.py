@@ -97,11 +97,11 @@ class TestForgetPriority(unittest.TestCase):
     """遗忘优先级 = 规模 × (1-A) × 衰减；豁免 = 0。"""
 
     def test_exempt_mem_priority_zero(self):
-        mems = [make_mem(f"m{i}", "砚", days_ago_access=60, days_ago_update=60)
+        mems = [make_mem(f"m{i}", "user", days_ago_access=60, days_ago_update=60)
                 for i in range(3)]
         stats = fg.compute_project_stats(mems)
         p = fg.compute_forget_priority(mems[0], stats)
-        self.assertEqual(p, 0.0)  # 砚 是身份实体 → 豁免
+        self.assertEqual(p, 0.0)  # user 是身份实体 → 豁免
 
     def test_pinned_mem_priority_zero(self):
         mems = [make_mem(f"m{i}", "projX", days_ago_access=60, days_ago_update=60, pinned=True)
@@ -152,9 +152,15 @@ class TestMemoryWeight(unittest.TestCase):
         self.assertEqual(fg.get_memory_weight(mems[0], stats), 1.0)
 
     def test_exempt_always_one(self):
-        mems = [make_mem(f"m{i}", "潜进", days_ago_access=60, days_ago_update=60) for i in range(3)]
+        mems = [make_mem(f"m{i}", "super-brain", days_ago_access=60, days_ago_update=60) for i in range(3)]
         stats = fg.compute_project_stats(mems)
         self.assertEqual(fg.get_memory_weight(mems[0], stats), 1.0)
+
+    def test_non_exempt_entity_decays(self):
+        """对照组：不在 EXEMPT_ENTITIES 中的 entity 按常规衰减（防止豁免集被写成「全部豁免」）。"""
+        mems = [make_mem(f"m{i}", "ordinaryProject", days_ago_access=60, days_ago_update=60) for i in range(3)]
+        stats = fg.compute_project_stats(mems)
+        self.assertEqual(fg.get_memory_weight(mems[0], stats), 0.5)
 
 
 class TestScanAndApply(unittest.TestCase):
@@ -196,7 +202,7 @@ class TestScanAndApply(unittest.TestCase):
         self.assertEqual(res2["changed"], 0)  # 已 demote 的不重复改
 
     def test_apply_skips_exempt(self):
-        mems = [make_mem(f"m{i}", "砚", days_ago_access=60, days_ago_update=60) for i in range(3)]
+        mems = [make_mem(f"m{i}", "user", days_ago_access=60, days_ago_update=60) for i in range(3)]
         res = fg.apply_forgetting(mems)
         self.assertEqual(res["changed"], 0)
         for m in res["memories"]:

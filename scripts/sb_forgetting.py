@@ -62,8 +62,10 @@ DECAY_NORMAL = 1.0         # 正常衰减因子
 CANDIDATE_PRIORITY_MIN = 0.05  # warm 高风险项目进候选的报告阈值
 
 # 豁免实体：身份/护栏类记忆永不衰减（entity 命中即豁免）
+# note: 此列表按「作者个人工作空间」的真实 entity 值书写；使用者可按自己的
+# 实体命名增删。默认值只是示例，不影响通用行为（未命中即按常规衰减处理）。
 EXEMPT_ENTITIES = {
-    "砚", "user", "潜进", "super-brain", "超脑", "编码护栏", "工作原则",
+    "user", "super-brain", "超脑",
 }
 
 

@@ -499,50 +499,30 @@ BOARD_STATUSES = ["进行中", "待拍板", "规划中", "已完成", "暂停"]
 
 
 def _seed_board():
-    """首次播种：手上正在推进的真实项目与对话中提到的任务（来源：工作记忆）。"""
+    """首次播种：给出一个「示例看板」，用户首次打开工作台即可看到形状。
+
+    note（发布版）：以下仅是占位示例数据，不含任何真实项目/域名信息。
+    用户可在面板上直接增删改，或让 Agent 用「对话即上板」覆盖为自己的项目。
+    """
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     return {
         "version": 1,
         "updated_at": now,
         "projects": [
-            {"id": "p_superbrain", "name": "超脑（Super Brain）",
+            {"id": "p_demo1", "name": "示例项目 A",
              "status": "进行中",
-             "note": "阶段2 全量收尾；v3.12.2 攒发布（后台整合+时态+图谱消融+工作台）",
+             "note": "点右侧「编辑」改成你自己的项目；或让 Agent 直接上板",
              "updated_at": now},
-            {"id": "p_workbench", "name": "超脑工作台",
-             "status": "进行中",
-             "note": "C 端化改造完成；P3 体检历史趋势待做",
-             "updated_at": now},
-            {"id": "p_portfolio", "name": "作品集网站 v8",
-             "status": "进行中",
-             "note": "a1m1ng.cn；开发统一在知识库框架下",
-             "updated_at": now},
-            {"id": "p_yanshen", "name": "砚之身",
+            {"id": "p_demo2", "name": "示例项目 B",
              "status": "规划中",
-             "note": "M0-M3 完成；M4+ 规划中（VTuber 集成、TTS 全链路、桌宠打包）",
-             "updated_at": now},
-            {"id": "p_tarot", "name": "Liquid Tarot",
-             "status": "进行中",
-             "note": "iOS 27 Liquid Glass 风格 web app；塔罗 KB 14 本建设中",
-             "updated_at": now},
-            {"id": "p_mobile", "name": "mobile-hifi-B",
-             "status": "进行中",
-             "note": "v3.5.0+；dock 栏玻璃效果偏移排查中",
+             "note": "状态可选：进行中 / 待拍板 / 规划中 / 已完成 / 暂停",
              "updated_at": now},
         ],
         "tasks": [
-            {"id": "t_seed1", "title": "v3.12.2 发布（走 github-project-publisher，需拍板）",
-             "project": "超脑（Super Brain）", "done": False, "due": None},
-            {"id": "t_seed2", "title": "graph build 定期跑（新记忆 ent=0，建图后才进工作空间）",
-             "project": "超脑（Super Brain）", "done": False, "due": None},
-            {"id": "t_seed3", "title": "「AI 深入检查」自动化版（error 写待办文件，先评估 token 契约）",
-             "project": "超脑工作台", "done": False, "due": None},
-            {"id": "t_seed4", "title": "工作台 P3：体检历史趋势视图",
-             "project": "超脑工作台", "done": False, "due": None},
-            {"id": "t_seed5", "title": "清理 super-brain 数据目录 health_lite.lock.deleted.* 残留",
-             "project": "超脑（Super Brain）", "done": False, "due": None},
-            {"id": "t_seed6", "title": "access 统计死字段恢复",
-             "project": "超脑（Super Brain）", "done": False, "due": None},
+            {"id": "t_demo1", "title": "把示例项目改成你正在推进的事",
+             "project": "示例项目 A", "done": False, "due": None},
+            {"id": "t_demo2", "title": "试试在对话里说「把 XX 加到看板上」",
+             "project": "示例项目 A", "done": False, "due": None},
         ],
     }
 
@@ -719,11 +699,12 @@ def api_board(payload):
         _write_board(result)
         return {"ok": True, "imported": {"projects": len(result["projects"]),
                                          "tasks": len(result["tasks"])},
-                "state": api_state()}
+                "board": result, "board_stats": _board_stats(result)}
     else:
         return {"ok": False, "error": f"未知操作: {action}"}
     _write_board(b)
-    return {"ok": True, "state": api_state()}
+    # 轻量写通道：写动作只回传 board 与统计，省去 api_state() 的 schtasks 子进程查询（实测 0.1-1.5s 延迟来源）
+    return {"ok": True, "board": b, "board_stats": _board_stats(b)}
 
 
 # ---------------------------------------------------------------------------
@@ -768,6 +749,16 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/proposals":
             st = api_state()
             self._send_json(st.get("consolidation_proposals") or {})
+        elif path_only == "/favicon.ico":
+            # 浏览器默认请求：返回内嵌 SVG 图标（品牌琥珀圆点），消除 console 404 红字
+            svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
+                   "<circle cx='8' cy='8' r='6' fill='#D98A1F'/></svg>")
+            data = svg.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         else:
             self.send_error(404, "not found")
 
@@ -854,7 +845,7 @@ if(t!=="dark"&&t!=="light"){t=(window.matchMedia&&matchMedia("(prefers-color-sch
 if(t==="dark")document.documentElement.dataset.theme="dark";})();
 </script>
 <style>
-  /* 设计 Token — 白盒子画廊语言（源自 a1m1ng.cn v8）× 超脑琥珀 */
+  /* 设计 Token — 白盒子画廊语言（暖白底 + 琥珀）× 定制 */
   :root {
     --bg:        #faf9f6;
     --surface:   #ffffff;
@@ -1090,6 +1081,35 @@ if(t==="dark")document.documentElement.dataset.theme="dark";})();
             color:var(--due-ink); margin-bottom:14px; }
   .duebox.soon { background:var(--amber-soft); border-color:rgba(217,138,31,.28);
                  color:var(--amber-deep); }
+  /* 「今天要处理」（学习装修工作台案例首屏区）：逾期+今天到期逐项列出，
+     逾期整块红调、每项可直接勾完成或定位到下方看板 */
+  .todaybox { border:1px solid rgba(184,69,37,.25); background:var(--cinnabar-soft);
+              border-radius:12px; padding:12px 14px; margin-bottom:14px; }
+  .todaybox.nocal { background:var(--amber-soft); border-color:rgba(217,138,31,.3); }
+  .todaybox .thead { display:flex; align-items:center; gap:8px; margin-bottom:6px;
+                     font-family:var(--serif); font-size:15px; font-weight:900;
+                     color:var(--due-ink); }
+  .todaybox.nocal .thead { color:var(--amber-deep); }
+  .todaybox .thead .mno { margin-left:auto; font-weight:400; }
+  .todayitem { display:flex; align-items:flex-start; gap:9px; padding:7px 0;
+               font-size:13.5px; border-top:1px dashed rgba(184,69,37,.18); }
+  .todaybox.nocal .todayitem { border-top-color:rgba(217,138,31,.2); }
+  .todayitem:first-of-type { border-top:none; }
+  .todayitem input[type="checkbox"] { width:16px; height:16px;
+            accent-color:var(--amber); margin-top:2px; cursor:pointer; flex:none; }
+  .todayitem input[type="checkbox"]:checked { animation:pop .25s ease-out; }
+  .ti-title { flex:1 1 auto; word-break:break-word; cursor:pointer; }
+  /* 看板数据卡（学习装修工作台首页四卡）：一眼看清任务面 */
+  .statgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px;
+              margin-bottom:16px; }
+  .stat { background:var(--surface); border:1px solid var(--line); border-radius:12px;
+          padding:10px 12px; }
+  .stat .sv { font-family:var(--serif); font-size:22px; font-weight:900;
+              letter-spacing:-.4px; line-height:1.15; }
+  .stat .sv.over { color:var(--err); }
+  .stat .sv.soon { color:var(--amber-deep); }
+  .stat .sk { font-size:11px; color:var(--ink3); margin-top:2px; }
+  @media (max-width:768px) { .statgrid { grid-template-columns:repeat(2,1fr); } }
   /* 项目进度条（R1）：任务完成度一眼可见 */
   .pbar { height:3px; background:var(--warm-gray); border-radius:2px;
           margin-top:8px; overflow:hidden; }
@@ -1167,10 +1187,52 @@ if(t==="dark")document.documentElement.dataset.theme="dark";})();
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation:none !important; transition:none !important; }
   }
+  /* R6 Ctrl+K 命令面板（克制：1 个 input + 1 个列表 + 1 个遮罩，不抢主体） */
+  .cmdp { position:fixed; inset:0; z-index:100; display:flex; align-items:flex-start; justify-content:center; padding-top:14vh; }
+  .cmdp.hidden { display:none; }
+  .cmdp-mask { position:absolute; inset:0; background:rgba(20,18,14,.55); backdrop-filter:blur(6px); }
+  .cmdp-box { position:relative; width:min(560px, 92vw); max-height:62vh; background:var(--card); border:1px solid var(--amber); border-radius:12px; box-shadow:0 24px 60px rgba(0,0,0,.28); overflow:hidden; display:flex; flex-direction:column; }
+  .cmdp-input { padding:14px 16px; font-size:15px; background:transparent; border:0; border-bottom:1px solid var(--line); color:var(--ink); outline:none; font-family:inherit; }
+  .cmdp-input::placeholder { color:var(--ink3); }
+  .cmdp-list { list-style:none; margin:0; padding:6px 0; overflow-y:auto; flex:1 1 auto; }
+  .cmdp-item { padding:9px 16px; display:flex; gap:12px; align-items:center; cursor:pointer; color:var(--ink2); font-size:13px; line-height:1.4; }
+  .cmdp-item.sel, .cmdp-item:hover { background:var(--amber); color:#fff; }
+  .cmdp-item .ico { width:14px; height:14px; flex-shrink:0; opacity:.55; }
+  .cmdp-item.sel .ico, .cmdp-item:hover .ico { opacity:1; }
+  .cmdp-item .meta { font-size:12px; opacity:.65; margin-left:auto; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cmdp-item.sel .meta, .cmdp-item:hover .meta { opacity:.9; }
+  .cmdp-empty { padding:24px 16px; color:var(--ink3); font-size:13px; text-align:center; }
+  .cmdp-foot { display:flex; gap:18px; padding:7px 16px; font-size:11px; color:var(--ink3); border-top:1px solid var(--line); background:transparent; }
+  .cmdp-foot kbd { font-family:inherit; font-size:10px; padding:1px 5px; border:1px solid var(--line); border-radius:3px; background:rgba(255,255,255,.04); }
+  /* 入场（reduced-motion 一刀切） */
+  @keyframes cmdpIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+  .cmdp:not(.hidden) .cmdp-box { animation:cmdpIn .18s ease-out; }
+  /* 任务高亮（focusTask 触发） */
+  @keyframes cmdpFlash { 0%,100% { background:transparent; } 30% { background:rgba(184,69,37,.28); } }
+  .cmdp-flash { animation:cmdpFlash 1.1s ease-out; border-radius:6px; }
+  @media (prefers-reduced-motion: reduce) {
+    .cmdp:not(.hidden) .cmdp-box, .cmdp-flash { animation:none !important; }
+  }
 </style>
 </head>
 <body>
 <div id="errbar" class="errbar" style="display:none" role="alert"></div>
+<!-- R6 Ctrl+K 命令面板：默认 hidden，全局快捷键唤起 -->
+<div id="cmdp" class="cmdp hidden" role="dialog" aria-modal="true" aria-label="命令面板">
+  <div class="cmdp-mask" onclick="toggleCmdP(false)" aria-label="关闭"></div>
+  <div class="cmdp-box">
+    <input id="cmdp-input" type="text" class="cmdp-input" placeholder="搜索命令或任务…"
+           autocomplete="off" spellcheck="false" aria-label="命令搜索"
+           oninput="renderCmdP()" onkeydown="if(event.key==='Enter'){runCmdP(cmdpSel);event.preventDefault();}" />
+    <ul id="cmdp-list" class="cmdp-list" role="listbox" aria-label="命令列表"></ul>
+    <div class="cmdp-foot">
+      <span><kbd>↑</kbd> <kbd>↓</kbd> 选中</span>
+      <span><kbd>↵</kbd> 执行</span>
+      <span><kbd>Esc</kbd> 关闭</span>
+      <span style="margin-left:auto"><kbd>Ctrl/⌘</kbd>+<kbd>K</kbd> 唤起</span>
+    </div>
+  </div>
+</div>
 <div class="wrap">
   <div class="kicker">Super Brain · Workbench</div>
   <h1>超脑工作台<small>记忆库管家 · 127.0.0.1:__PORT__</small></h1>
@@ -1228,6 +1290,7 @@ let EXPANDED = new Set();     // 展开任务清单的项目 id
 let EDIT_ID = null;           // 正在编辑 note 的项目 id
 let EDIT_TASK_ID = null;      // 正在行内编辑的任务 id
 let GRAPH_STALE = false;      // 体检后图谱快照已过期（提醒重新生成）
+let LAST_WRITE = 0;           // 最近一次本地写成功的时间戳：poll 回滚竞态防护
 
 const $ = id => document.getElementById(id);
 
@@ -1319,6 +1382,9 @@ const SVG_CHEV = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="t
 const SVG_EDIT = '<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">'
   + '<path d="M4 20l4.5-1L20 7.5 16.5 4 5 15.5 4 20z" fill="none"'
   + ' stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+const SVG_TARGET = '<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">'
+  + '<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/>'
+  + '<circle cx="12" cy="12" r="2.6" fill="currentColor"/></svg>';
 
 // ---------------- 数据 ----------------
 async function load() {
@@ -1347,13 +1413,17 @@ function refreshAll() {
 
 // 「对话即上板」实时同步：轻量轮询 board（无子进程，5s），有变化只刷看板区。
 // 编辑/确认/输入聚焦时跳过本轮应用，不打断操作。
+// 写后静默窗：请求发出前 + 响应处理点双重检查 LAST_WRITE——poll 读到旧值期间
+// 若恰好发生本地写，旧响应晚到会用旧 updated_at 回滚刚写的状态（勾选被打回）。
 async function pollBoard() {
   if (CONFIRMING || EDIT_ID || RUNNING || EDIT_TASK_ID) return;
+  if (Date.now() - LAST_WRITE < 2000) return;
   const box = $("board");
   if (document.activeElement && box.contains(document.activeElement)) return;
   try {
     const r = await fetch("/api/board/poll");
     const b = await r.json();
+    if (Date.now() - LAST_WRITE < 2000) return;   // 响应处理点二次检查
     const cur = STATE.board && STATE.board.updated_at;
     if (b && b.updated_at !== cur) {
       STATE.board = b;
@@ -1677,7 +1747,7 @@ function taskRow(t, inProject) {
       + '<button onclick="cancelTaskEdit()">取消</button></div></div>';
   }
   return '<div class="task' + (t.done ? " done" : "") + '">'
-    + '<input type="checkbox" ' + (t.done ? "checked" : "")
+    + '<input type="checkbox" data-id="' + t.id + '" ' + (t.done ? "checked" : "")
     + ' onchange="toggleTask(\'' + t.id + '\')">'
     + '<span class="t-title" title="点击编辑任务（内容/截止日/所属项目）"'
     + ' style="cursor:pointer" onclick="editTask(\'' + t.id + '\')">'
@@ -1688,6 +1758,18 @@ function taskRow(t, inProject) {
          : (t.due ? '<span class="t-due">' + esc(t.due.slice(5)) + '</span>' : ""))
     + '<button class="iconbtn" title="删除任务" onclick="delTask(\'' + t.id
     + '\')">' + SVG_X + '</button></div>';
+}
+
+function todayRow(t) {
+  const m = dueMeta(t.due);
+  return '<div class="todayitem">'
+    + '<input type="checkbox" data-id="' + t.id + '" onchange="toggleTask(\''
+    + t.id + '\')">'
+    + '<span class="ti-title" title="点击编辑任务（内容/截止日/所属项目）"'
+    + ' onclick="editTask(\'' + t.id + '\')">' + esc(t.title) + '</span>'
+    + '<span class="t-due ' + m.cls + '">' + m.text + '</span>'
+    + '<button class="iconbtn" title="在下方看板中定位（自动展开所在项目）"'
+    + ' onclick="focusTask(\'' + t.id + '\')">' + SVG_TARGET + '</button></div>';
 }
 
 function renderBoard() {
@@ -1701,18 +1783,43 @@ function renderBoard() {
   const ordered = [...projects].sort((a, b2) => (b2.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
   const today = todayStr();
 
-  // 「今天要处理」：逾期 + 7 天内到期，全局置顶（铁律 5）
-  const urgent = open.map(t => ({ t, m: dueMeta(t.due) }))
-    .filter(x => x.m && x.m.cls !== "")
+  // 「今天要处理」（学习装修工作台案例首屏区）：逾期 + 今天到期逐项置顶；
+  // 7 天内到期保留一行轻提示（铁律 5）
+  const withDue = open.map(t => ({ t, m: dueMeta(t.due) }));
+  const urgent = withDue.filter(x => x.m && x.m.cls === "over")
+    .concat(withDue.filter(x => x.t.due === today))
     .sort((a, b2) => (a.t.due < b2.t.due ? -1 : 1));
+  const soonOnly = withDue.filter(x => x.m && x.m.cls === "soon"
+    && x.t.due !== today).sort((a, b2) => (a.t.due < b2.t.due ? -1 : 1));
   let urgentHtml = "";
   if (urgent.length) {
     const hasOver = urgent.some(x => x.m.cls === "over");
-    urgentHtml = '<div class="duebox' + (hasOver ? "" : " soon") + '"><b>'
-      + (hasOver ? "有任务逾期：" : "最近到期：") + '</b>'
-      + urgent.map(x => esc(x.t.title) + "（" + x.m.text + "）").join("；")
-      + '</div>';
+    urgentHtml = '<div class="todaybox' + (hasOver ? "" : " nocal") + '">'
+      + '<div class="thead">' + (hasOver ? dot("err") : dot("warn"))
+      + (hasOver ? "今天要处理 · 有逾期" : "今天要处理")
+      + '<span class="mno">' + urgent.length + ' 项</span></div>'
+      + urgent.map(x => todayRow(x.t)).join("") + '</div>';
+  } else if (soonOnly.length) {
+    urgentHtml = '<div class="duebox soon"><b>最近到期：</b>'
+      + soonOnly.slice(0, 5).map(x => esc(x.t.title) + "（" + x.m.text + "）").join("；")
+      + (soonOnly.length > 5 ? " 等 " + soonOnly.length + " 项" : "") + '</div>';
   }
+
+  // 数据卡（学习装修工作台首页四卡）：未完成 / 已逾期 / 7 天内 / 已完成
+  const nOver = withDue.filter(x => x.m && x.m.cls === "over").length;
+  const nSoon = withDue.filter(x => x.m && x.m.cls === "soon").length;
+  const statgrid = tasks.length
+    ? '<div class="statgrid">'
+      + '<div class="stat"><div class="sv">' + open.length + '</div>'
+      + '<div class="sk">待处理任务</div></div>'
+      + '<div class="stat"><div class="sv' + (nOver ? " over" : "") + '">' + nOver
+      + '</div><div class="sk">已逾期</div></div>'
+      + '<div class="stat"><div class="sv' + (nSoon ? " soon" : "") + '">' + nSoon
+      + '</div><div class="sk">7 天内到期</div></div>'
+      + '<div class="stat"><div class="sv">' + done.length + '</div>'
+      + '<div class="sk">已完成</div></div>'
+      + '</div>'
+    : "";
 
   const projBlock = (p, idx, total) => {
     const myOpen = open.filter(t => t.project === p.name);
@@ -1788,7 +1895,7 @@ function renderBoard() {
       + ' 条。</b>它们只保存在这台电脑上——建议点右上「导出 JSON」留一份备份。</div>'
     : "";
 
-  el.innerHTML = urgentHtml + backupHint
+  el.innerHTML = urgentHtml + statgrid + backupHint
     + '<div class="proj" style="border-bottom:none;padding-bottom:4px">'
     + '<div class="proj-head" style="cursor:default;gap:10px">'
     + '<span class="mno">Projects · 点击行展开任务 · 工具钮：置顶 / 排序 / 删除</span>'
@@ -1855,7 +1962,7 @@ function delProject(id) {
   if (!confirm(msg)) return;
   boardAct({ action: "del_project", id: id });
 }
-function toggleTask(id) { boardAct({ action: "toggle_task", id: id }); }
+function toggleTask(id) { return boardAct({ action: "toggle_task", id: id }); }
 function delTask(id) {
   const t = (((STATE.board || {}).tasks) || []).find(x => x.id === id);
   if (t && !confirm("删除任务「" + t.title + "」？\n此操作不可撤销。")) return;
@@ -1981,7 +2088,17 @@ async function boardAct(payload) {
       body: JSON.stringify(payload) });
     const res = await r.json();
     if (res.ok === false && res.error) { toast(res.error); return false; }
-    STATE = res.state || STATE; refreshAll(); return true;
+    if (res.board) {
+      // 轻量写通道：只刷看板分区（hero/services 依赖的 health/registry 不变）
+      STATE.board = res.board;
+      STATE.board_stats = res.board_stats || localBoardStats(res.board);
+      LAST_WRITE = Date.now();
+      renderBoard();
+      renderPulse();
+    } else if (res.state) {
+      STATE = res.state; LAST_WRITE = Date.now(); refreshAll();
+    }
+    return true;
   } catch (e) { toast("操作失败：" + e.message); return false; }
 }
 
@@ -2020,7 +2137,7 @@ async function importBoard(input) {
       body: JSON.stringify({ action: "import_board", data: data }) });
     const res = await r.json();
     if (res.ok === false) { showError(res.error || "导入失败。", false); return; }
-    STATE = res.state || STATE; refreshAll();
+    STATE = res.state || STATE; LAST_WRITE = Date.now(); refreshAll();
     hideError();
     toast("导入完成：" + ((res.imported || {}).projects || 0) + " 个项目、"
       + ((res.imported || {}).tasks || 0) + " 个任务");
@@ -2042,6 +2159,122 @@ $("graph-frame").addEventListener("load", () => {
 });
 load();
 setInterval(() => { if (!RUNNING) load(); }, 60000);
+
+// ---------------- R6：Ctrl+K 命令面板（轻量，6 命令 + 任务模糊搜索） ----------------
+const CMDP_ICONS = {
+  'cmd:new':     '⊕',
+  'cmd:dash':    '▦',
+  'cmd:theme':   '◐',
+  'cmd:ai':      '✎',
+  'cmd:export':  '↧',
+  'cmd:refresh': '↻',
+  task:          '▢',
+};
+const CMDP_COMMANDS = [
+  { id: 'cmd:new',     label: '新建任务',         meta: '当前项目',  action: () => promptNewTask() },
+  { id: 'cmd:dash',    label: '打开健康看板',     meta: '/dashboard', action: () => { location.href = '/dashboard'; } },
+  { id: 'cmd:theme',   label: '切换主题（深/浅）', meta: '',          action: () => toggleTheme() },
+  { id: 'cmd:ai',      label: '复制 AI 提示词',   meta: '',          action: () => copyAI() },
+  { id: 'cmd:export',  label: '导出看板 JSON',    meta: '',          action: () => exportBoard() },
+  { id: 'cmd:refresh', label: '刷新健康看板',     meta: '',          action: () => fetch('/api/dashboard/refresh', { method: 'POST' }).then(() => toast('已触发刷新')) },
+];
+let cmdpOpen = false;
+let cmdpSel = 0;
+let cmdpResults = [];
+function toggleCmdP(force) {
+  cmdpOpen = (force === undefined) ? !cmdpOpen : !!force;
+  const el = $('cmdp');
+  if (cmdpOpen) {
+    el.classList.remove('hidden');
+    const inp = $('cmdp-input');
+    inp.value = '';
+    renderCmdP();
+    setTimeout(() => inp.focus(), 0);
+  } else {
+    el.classList.add('hidden');
+  }
+}
+function renderCmdP() {
+  const q = ($('cmdp-input').value || '').toLowerCase().trim();
+  cmdpResults = [];
+  CMDP_COMMANDS.forEach(c => {
+    if (!q || c.label.toLowerCase().includes(q) || c.id.includes(q)) {
+      cmdpResults.push(Object.assign({ kind: 'cmd' }, c));
+    }
+  });
+  const tasks = (STATE.board && STATE.board.tasks) || [];
+  tasks.filter(t => !q
+      || (t.title || '').toLowerCase().includes(q)
+      || (t.desc  || '').toLowerCase().includes(q)
+      || (t.project || '').toLowerCase().includes(q))
+    .slice(0, 12)
+    .forEach(t => {
+      cmdpResults.push({ kind: 'task', id: t.id, label: t.title || '(无标题)', meta: t.project || '', action: () => focusTask(t.id) });
+    });
+  if (cmdpSel >= cmdpResults.length) cmdpSel = Math.max(0, cmdpResults.length - 1);
+  const list = $('cmdp-list');
+  if (!cmdpResults.length) { list.innerHTML = '<li class="cmdp-empty">没有匹配的命令或任务</li>'; return; }
+  list.innerHTML = cmdpResults.map((r, i) =>
+    '<li class="cmdp-item' + (i === cmdpSel ? ' sel' : '') + '" data-i="' + i + '"'
+    + ' onclick="runCmdP(' + i + ')" onmouseenter="cmdpSel=' + i + ';renderCmdP()">'
+    + '<span class="ico">' + (r.kind === 'cmd' ? CMDP_ICONS[r.id] : CMDP_ICONS.task) + '</span>'
+    + '<span>' + esc(r.label) + '</span>'
+    + (r.meta ? '<span class="meta">' + esc(r.meta) + '</span>' : '')
+    + '</li>'
+  ).join('');
+}
+function runCmdP(i) {
+  const r = cmdpResults[i];
+  if (!r) return;
+  toggleCmdP(false);
+  try { r.action(); } catch (e) { toast('执行失败：' + e.message); }
+}
+function focusTask(id) {
+  const cb = document.querySelector('.task input[data-id="' + id + '"]');
+  const el = cb ? cb.closest('.task') : null;
+  if (!el) { toast('该任务在当前视图未渲染（可能已完成或折叠）'); return; }
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('cmdp-flash');
+  setTimeout(() => el.classList.remove('cmdp-flash'), 1200);
+}
+function promptNewTask() {
+  const b = STATE.board || { projects: [], tasks: [] };
+  if (!b.projects || !b.projects.length) { toast('请先创建一个项目'); return; }
+  const title = window.prompt('任务标题（将加入第一个项目）');
+  if (!title || !title.trim()) return;
+  fetch('/api/board', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'add_task', project: b.projects[0].name, title: title.trim() }) })
+    .then(r => r.json())
+    .then(res => {
+      if (res.ok === false) { toast(res.error || '新建失败'); return; }
+      if (res.board) {
+        STATE.board = res.board;
+        STATE.board_stats = res.board_stats || localBoardStats(res.board);
+        LAST_WRITE = Date.now();
+        renderBoard(); renderPulse();
+      } else if (res.state) { STATE = res.state; LAST_WRITE = Date.now(); refreshAll(); }
+      toast('已新建：' + title.trim());
+    })
+    .catch(e => toast('新建失败：' + e.message));
+}
+document.addEventListener('keydown', e => {
+  // Cmd/Ctrl+K：开/关（不依赖焦点位置——任务标题/AI 提示词框也可唤起）
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    toggleCmdP();
+    return;
+  }
+  if (!cmdpOpen) return;
+  if (e.key === 'Escape') { e.preventDefault(); toggleCmdP(false); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = cmdpResults.length || 1;
+    cmdpSel = (cmdpSel + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    renderCmdP();
+    return;
+  }
+  if (e.key === 'Enter') { e.preventDefault(); runCmdP(cmdpSel); return; }
+});
 </script>
 </body>
 </html>

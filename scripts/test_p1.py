@@ -2,7 +2,7 @@
 """
 SuperBrain v3.9.5 P1-8 关键路径补测
 =====================================
-覆盖审阅 P1-8 四项：① 硬步骤门控 exit 2 与 --force 豁免路径
+覆盖审阅 P1-8 四项：① 硬步骤门控移除后的回潮保护（v3.13.0 改造）
 ② v3.4.3 损坏 JSON 备份恢复机制 ③ persona/project 双层召回
 ④ RRF 秩融合排序正确性
 
@@ -25,7 +25,6 @@ from sb_core import (
     DEFAULT_DATA_DIR
 )
 from sb_memory import add_memory, search as memory_search
-from sb_gating import enforce_hard_step_guard, mark_search_done
 from sb_search import search_memories, tokenize
 
 PASS = FAIL = 0
@@ -39,54 +38,31 @@ def check(name, cond, detail=""):
 
 
 # ========================
-# T1: 硬步骤门控 exit 2
+# T1: 硬步骤门控移除后的回潮保护
 # ========================
-def test_hardstep_exit():
-    print("\n--- T1: 硬步骤门控 exit 2 ---")
+def test_hardstep_removed():
+    """v3.13.0: 硬步骤门控已移除，本测试防止其被无意识重新引入。
 
-    # 1a: 强制解锁后正常放行
-    mark_search_done("超脑 测试")
-    import io
-    saved_stderr = sys.stderr
-    sys.stderr = io.StringIO()
-    try:
-        # 无 force、时间窗口内 → 不应 raise
-        enforce_hard_step_guard(force=False, content="超脑记忆测试", command="test")
-        check("T1a: 窗口内写入放行（无 exit）", True)
-    except SystemExit:
-        check("T1a: 窗口内写入放行", False, "意外 exit")
-    finally:
-        sys.stderr = saved_stderr
+    历史沿革：v3.7.1 以 exit 2 拦截未检索的写入 → v3.9.7 降级为自动放行
+    （跨会话死锁修复）→ v3.13.0 依实测整体移除。移除依据：孤岛率仅
+    0.6%（全局）/ 10.9%（最保守口径），且 .hardstep.json 遗留 50+ 条
+    --force 绕过记录。详见 superbrain-bench/audit_island.py。
+    """
+    print("\n--- T1: 硬步骤门控已移除（回潮保护）---")
 
-    # 1b: 手动失效时间戳 → 应自动重置并放行（不再 exit 2）
-    st = __import__("sb_gating")
-    st._hardstep_load()  # ensure file exists
-    state = st._hardstep_load()
-    state["last_search_ts"] = 100  # epoch start, 50+ years ago
-    st._hardstep_save(state)
+    import sb_gating
+    for sym in ("enforce_hard_step_guard", "mark_search_done",
+                "_hardstep_load", "_hardstep_save", "HARDSTEP_STATE_FILE",
+                "HARDSTEP_WINDOW_SECONDS"):
+        check(f"T1: sb_gating 不再导出 {sym}", not hasattr(sb_gating, sym))
 
-    import io
-    sys.stderr = io.StringIO()
-    try:
-        enforce_hard_step_guard(force=False, content="test", command="memory add")
-        check("T1b: 过期窗口自动重置并放行（不再 exit）", True)
-    except SystemExit as e:
-        check("T1b: 过期窗口不应 exit", False, f"unexpected exit code={e.code}")
-    finally:
-        sys.stderr = saved_stderr
-        # 恢复——重置检索状态
-        mark_search_done("test query")
+    cli_path = os.path.join(SCRIPT_DIR, "superbrain.py")
+    cli_src = open(cli_path, encoding="utf-8").read()
+    for sym in ("enforce_hard_step_guard", "mark_search_done"):
+        check(f"T1: superbrain.py 无 {sym} 残留", sym not in cli_src)
 
-    # 1c: --force 强制豁免
-    import io
-    sys.stderr = io.StringIO()
-    try:
-        enforce_hard_step_guard(force=True, content="test force", command="test")
-        check("T1c: --force 豁免不抛 exit", True)
-    except SystemExit:
-        check("T1c: --force 豁免", False, "意外 exit")
-    finally:
-        sys.stderr = saved_stderr
+    # --force 参数保留为 no-op，向后兼容既有调用方
+    check("T1: --force 参数仍被接受（已废弃 no-op）", cli_src.count("--force") >= 3)
 
 
 # ========================
@@ -140,8 +116,7 @@ def test_persona_search():
     print("\n--- T3: persona 双层召回 ---")
     from sb_core import get_persona_workspace_dir, write_persona_memories, read_persona_memories
 
-    # 直接写 project workspace（不用 add_memory 避免触硬步骤门控）
-    mark_search_done("typescript react")
+    # 直接写 project workspace（不用 add_memory）
     from sb_core import write_memories as _wm
     _wm([{
         "id": "proj_1", "content": "项目使用 React 18 和 TypeScript",
@@ -237,14 +212,48 @@ def test_binary_json_recovery():
 
 
 # ========================
+# T6: 版本元数据一致性（防漂移）
+# ========================
+def test_version_metadata():
+    """v3.13.1: 版本号/发布日期单点化后，防止再次漂移。
+
+    背景：v3.13.1 发布前发现 `superbrain.py cmd_version` 把发布日期硬编码为
+    "2026-08-06"，随版本迭代漂移了 5 个小版本；features 描述也停留在 v3.2 时代。
+    本测试锁定「权威来源」与「对外呈现」一致。
+    """
+    print("\n--- T6: 版本元数据一致性 ---")
+    import sb_core
+    import datetime
+    cli_src = open(os.path.join(SCRIPT_DIR, "superbrain.py"), encoding="utf-8").read()
+
+    check("T6a: sb_core 有 RELEASE_DATE", hasattr(sb_core, "RELEASE_DATE"),
+          "RELEASE_DATE 缺失（版本信息未单点化）")
+    if hasattr(sb_core, "RELEASE_DATE"):
+        rd = sb_core.RELEASE_DATE
+        check("T6b: RELEASE_DATE 是合法日期",
+              bool(datetime.datetime.strptime(rd, "%Y-%m-%d")),
+              f"got {rd!r}")
+    check("T6c: VERSION 与 RELEASE_DATE 同源于 sb_core",
+          "sb_core.RELEASE_DATE" in cli_src and "sb_core.VERSION" in cli_src,
+          "superbrain.py 仍在硬编码版本/日期")
+
+    # 反向断言：CLI 里不应再出现任何硬编码日期串
+    import re as _re
+    hard = _re.findall(r'Release date:\s*["\'](\d{4}-\d{2}-\d{2})["\']', cli_src)
+    check("T6d: CLI 无硬编码 release date", not hard,
+          f"发现硬编码: {hard}")
+
+
+# ========================
 if __name__ == "__main__":
     print(f"=== v3.9.5 P1-8 关键路径测试 (DATA={TEST_DATA}) ===\n")
 
-    test_hardstep_exit()
+    test_hardstep_removed()
     test_corrupted_json_recovery()
     test_persona_search()
     test_rrf_ordering()
     test_binary_json_recovery()
+    test_version_metadata()
 
     print(f"\n=== 结果: {PASS} 通过 / {FAIL} 失败 ===\n")
 

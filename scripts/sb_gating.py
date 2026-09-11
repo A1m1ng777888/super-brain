@@ -28,7 +28,6 @@ Author: A1m1ng777888
 
 import sys
 import os
-import time
 import uuid
 import functools
 import inspect
@@ -706,109 +705,25 @@ def get_status(workspace=None):
 
 
 # ============================================================================
-# v3.9.5: 硬步骤门控设施（从 superbrain.py 下沉到领域层）
-# 修复审阅 P1-5（门控加固）+ P2-10（策略下沉：门控策略不应在 CLI 层）
+# v3.13.0 (2026-09-11): 硬步骤门控已移除
+#
+# 删除对象：enforce_hard_step_guard / mark_search_done / _hardstep_load /
+#           _hardstep_save / HARDSTEP_* 常量 / DEFAULT_DATA_DIR/.hardstep.json
+#
+# 移除依据（全部可复现，见 superbrain-bench/audit_island.py）：
+#   1. 动作型门控可绕过 —— .hardstep.json 遗留 50+ 条 --force 审计记录，
+#      绕过成本仅四个字符；
+#   2. 实际上已失去约束力 —— v3.9.7 起超窗场景由 exit 2 拦截改为自动放行，
+#      且放行分支写 last_search_query="" 使后续 30 分钟相关性检查全部跳过；
+#   3. 收益远小于成本 —— 孤岛率实测：全局 0.6% / 因果 7.4% / 窗口 10.9%，
+#      top-1 相似度为随机基线 14 倍，且孤岛集中在库早期（候选集小）属自然现象。
+#
+# 替代方案（出口侧信号，不在写入入口设卡）：
+#   - superbrain-bench/audit_island.py 周期审计存量 + 增量孤岛率
+#
+# 已评估并否决的替代实现（负结果，勿重复尝试）：
+#   - 「入库时用 simhash 做关联度检查」——simhash top-1 均值 0.72、随机配对
+#     基线 p95 0.63，几乎无区分度；相对余弦孤岛判定 kappa=0.043、precision=0.027。
+#     64 位 simhash 对「近重复」有效（sb_memory 的 0.92 阈值仍成立），
+#     对「中间相似度」无效。详见 superbrain-bench/calibrate_linkage.py。
 # ============================================================================
-
-HARDSTEP_STATE_FILE = os.path.join(DEFAULT_DATA_DIR, ".hardstep.json")
-HARDSTEP_WINDOW_SECONDS = 30 * 60
-HARDSTEP_OVERRIDES_MAX = 200  # v3.9.5: overrides 环形截断
-
-
-def _hardstep_load():
-    """读取硬步骤状态文件（best-effort）。"""
-    try:
-        return read_json(HARDSTEP_STATE_FILE) or {}
-    except Exception:
-        return {}
-
-
-def _hardstep_save(state):
-    """v3.9.5: 改用 sb_core.write_json 原子写，替代裸 json.dump。"""
-    return write_json(HARDSTEP_STATE_FILE, state)
-
-
-def mark_search_done(query=""):
-    """记录一次 memory search，解锁后续写入命令。"""
-    state = _hardstep_load()
-    state["last_search_ts"] = time.time()
-    state["last_search_query"] = (query or "")[:200]
-    ok = _hardstep_save(state)
-    if not ok:
-        print("⚠️ [HARD-STEP] mark_search_done 写入失败，后续写入可能被误拦截",
-              file=sys.stderr)
-    return ok
-
-
-def enforce_hard_step_guard(force, content="", command=""):
-    """拦截未先检索的写入命令。
-
-    v3.9.5 加固：
-    - _hardstep_save 改用 write_json 原子写（修复裸 json.dump）
-    - last_search_ts 未来时间拒绝（阻止手填绕过，修复审阅安全中危项）
-    - overrides 环形截断 200 条（修复 .hardstep.json 无限膨胀）
-
-    v3.9.7 修复跨会话死锁：
-    - 跨会话 / 新会话场景（last_search_ts 超时 / None）改为自动重置计时器并放行，
-      而非 sys.exit(2) 拦截。保留警告提醒，消除跨会话自动入库静默丢失。
-    """
-    if force:
-        state = _hardstep_load()
-        overrides = state.get("overrides") or []
-        overrides.append({
-            "ts": time.time(),
-            "command": command or "unknown",
-            "content_preview": (content or "")[:100],
-        })
-        # v3.9.5: 环形截断——防 .hardstep.json 无限膨胀
-        if len(overrides) > HARDSTEP_OVERRIDES_MAX:
-            overrides = overrides[-HARDSTEP_OVERRIDES_MAX:]
-        state["overrides"] = overrides
-        _hardstep_save(state)
-        print("⚠️ [HARD-STEP OVERRIDE] 已用 --force 跳过「先检索后入库」强制校验（已写入审计）。",
-              file=sys.stderr)
-        return
-
-    state = _hardstep_load()
-    last = state.get("last_search_ts")
-
-    # v3.9.5: 未来时间拒绝——阻止手填时间戳绕过门控
-    if isinstance(last, (int, float)) and last > time.time() + 3600:
-        print("⚠️ [HARD-STEP] 检测到未来时间戳（疑为绕过门控），已重置检索状态。", file=sys.stderr)
-        state["last_search_ts"] = None
-        state.pop("last_search_query", None)
-        _hardstep_save(state)
-        last = None
-
-    satisfied = last is not None and (time.time() - last) <= HARDSTEP_WINDOW_SECONDS
-    if satisfied:
-        last_query = state.get("last_search_query", "")
-        if content and last_query:
-            try:
-                from sb_search import ternary_hash, ternary_similarity
-                sim = ternary_similarity(ternary_hash(last_query), ternary_hash(content))
-                if sim < 0.05:
-                    print(f"⚠️ [HARD-STEP 警告] 上次检索「{last_query[:40]}」与入库内容相关性低 (sim={sim:.3f})",
-                          file=sys.stderr)
-                    print("  建议先检索相关主题再入库；如确属不同主题，加 --force 豁免。",
-                          file=sys.stderr)
-            except Exception:
-                pass
-        return
-
-    # 跨会话 / 新会话：自动重置计时器并放行，而非 exit 2 拦截
-    if last is None:
-        reason = "从未检索（新环境或状态已重置）"
-    else:
-        elapsed = int(time.time() - last)
-        reason = f"上次检索在 {elapsed} 秒前，已超过 {HARDSTEP_WINDOW_SECONDS}s 窗口（跨会话新会话）"
-
-    print(f"\n  ℹ [HARD-STEP] {reason}。已自动重置检索计时器，本次写入已放行。",
-          file=sys.stderr)
-    print("  ℹ [HARD-STEP] 建议先执行 `SB memory search \"<主题>\"` 检索相关记忆。\n",
-          file=sys.stderr)
-
-    state["last_search_ts"] = time.time()
-    state["last_search_query"] = ""
-    _hardstep_save(state)
-    return

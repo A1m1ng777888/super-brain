@@ -145,12 +145,6 @@ from sb_orchestrator import (
 )
 
 
-# v3.9.5: 门控策略下沉至 sb_gating（审阅 P2-10），CLI 层只 import 调用。
-from sb_gating import (
-    enforce_hard_step_guard, mark_search_done,
-    HARDSTEP_WINDOW_SECONDS
-)
-
 # v1.0.0: 遗忘治理 CLI（实验 1 结论落地：软切降权 + dormant demote）
 from sb_forgetting import (
     scan_forgetting, apply_forgetting, status_forgetting
@@ -172,7 +166,6 @@ def cmd_init(args):
 def cmd_memory_add(args):
     """Add a new memory. v2.1.0: supports --valid-from/--valid-until/--replaces.
     v3.8.0: supports --persona flag to write to persona workspace."""
-    enforce_hard_step_guard(args.force, content=args.content, command="memory add")  # B4/R1/R3: 传内容+命令做相关性校验
     attrs = {}
     if args.category:
         attrs["category"] = args.category
@@ -238,7 +231,6 @@ def cmd_memory_search(args):
     # 时点止损）。此处恢复 CLI+MCP 两条用户路径的计数；评测器走进程内
     # sb_memory.search() 默认 False，统计不被污染。
     results = search(args.query, limit=args.limit, update_access_stats=True)
-    mark_search_done(args.query)  # B4: 传查询内容，供 enforce_hard_step_guard 相关性校验
     if not results:
         print("No matching memories found.")
         return
@@ -770,8 +762,11 @@ def cmd_version(args):
     """Show version information."""
     config = load_config()
     print(f"SuperBrain version {sb_core.VERSION}")
-    print(f"Release date: 2026-08-06")
-    print(f"Features: memory (v3.1 anti-pollution), search (v3.0 ternary hash+fuzzy), "
+    print(f"Release date: {sb_core.RELEASE_DATE}")
+    print(f"Features: memory (v3.1 anti-pollution), search (v3.12 BM25 single-path, "
+          f"CJK bigram+trigram), graph (v3.12 auto-build), gating (v3.12 scale-free "
+          f"relative threshold), forgetting (v3.11 governance engine), "
+          f"consolidation (v3.12 zero-LLM background), workbench (v3.12 local UI), "
           f"perception (v3.0), pipeline (v3.1 cleanup), reasoning (v3.1 warmup), "
           f"entanglement (v3.1 warmup), context (v3.0), longterm (v3.0), "
           f"obsidian (v3.7.2 export+sync+canvas), session (v3.1 T1+T2+T3), "
@@ -979,7 +974,6 @@ def cmd_trace_export(args):
 
 def cmd_memory_auto_store(args):
     """Auto-store important information from text."""
-    enforce_hard_step_guard(args.force, content=args.text, command="auto-store")  # B4/R1/R3: 传内容+命令
     result = auto_store(args.text, source_session=args.source, workspace=args.workspace)
     print_json(result)
 
@@ -1134,7 +1128,6 @@ def cmd_context_stats(args):
 
 def cmd_longterm_ingest(args):
     """Auto-ingest: dialogue as storage."""
-    enforce_hard_step_guard(args.force, content=args.text, command="longterm ingest")  # B4/R1/R3: 传内容+命令
     result = auto_ingest(args.text, source_session=args.source, workspace=args.workspace)
     print_json(result)
 
@@ -1374,7 +1367,7 @@ def build_parser():
                     help="v3.11.2: 幂等写入——已存在高度相似记忆(simhash>=0.95)"
                          "时跳过新增，直接返回那条。默认关闭以保持既有行为")
     sp.add_argument("--force", action="store_true",
-                    help="v3.7.1: 跳过「先检索后入库」硬步骤校验（会写审计，仅用于自动化/明确豁免）")
+                    help="[已废弃 v3.13.0] 保留仅为向后兼容，现为无操作；硬步骤门控已移除")
     sp.set_defaults(func=cmd_memory_add)
 
     # memory list
@@ -1678,7 +1671,7 @@ def build_parser():
     sp.add_argument("--source", help="Source session identifier")
     sp.add_argument("--workspace", help="Workspace name")
     sp.add_argument("--force", action="store_true",
-                    help="v3.7.1: 跳过「先检索后入库」硬步骤校验（会写审计，仅用于自动化/明确豁免）")
+                    help="[已废弃 v3.13.0] 保留仅为向后兼容，现为无操作；硬步骤门控已移除")
     sp.set_defaults(func=cmd_memory_auto_store)
 
     # memory correct
@@ -1931,7 +1924,7 @@ def build_parser():
     sp.add_argument("--source", help="Source session identifier")
     sp.add_argument("--workspace", help="Workspace name")
     sp.add_argument("--force", action="store_true",
-                    help="v3.7.1: 跳过「先检索后入库」硬步骤校验（会写审计，仅用于自动化/明确豁免）")
+                    help="[已废弃 v3.13.0] 保留仅为向后兼容，现为无操作；硬步骤门控已移除")
     sp.set_defaults(func=cmd_longterm_ingest)
 
     sp = longterm_sub.add_parser("index", help="Build retrieval index")

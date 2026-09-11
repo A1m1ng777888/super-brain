@@ -1,31 +1,95 @@
 # Changelog — Super Brain 超脑
 
-## v3.12.4 (2026-08-31) — 工作台易用性修复十二项（操作安全+反馈真实性+无障碍）
+## v3.13.1 (2026-09-11) — 修复跨进程并发写丢失（os.replace 降级路径）
 
-### 修复 — 操作安全
+### 修复 — Windows 上 os.replace 被并发读句柄阻塞
 
-- 删除项目/任务前新增确认弹窗，明示「此操作不可撤销」；删除项目时告知未完成任务的去向（保留并移入随手任务区）；移动端小图标按钮触控目标提升到 44×44px
-- 「应用整理建议」进行中，取消按钮同步禁用（避免误以为已取消而实际仍在应用）
+- 症状：`write_json` 的原子写 `os.replace(tmp, target)` 抛 `PermissionError(WinError 5)`，导致 `add_memory` 整个事务失败、记忆丢失。真实触发率约 12%，是 `test_concurrent_writes.py` 间歇失败（批量场景 4 次中 2 次）的根因。
+- 修复：保留原子写为快路径；捕获 `PermissionError` 后降级为「备份 → 原地覆盖写 → 写后 JSON 校验 → 校验失败回滚」（`sb_core._write_json_degraded`）。
 
-### 修复 — 状态与反馈真实性
+### 三条被实测否决的替代路（负结果存档，勿重复尝试）
 
-- 组件开关开启失败时不再误报「已开启」：明确提示失败原因，开关视觉自动还原（此前失败会同时出现「开关已开 × 状态未开启」的矛盾状态）
-- 开关安装/卸载期间显示过渡状态并锁定，防连点造成并发写冲突
-- 体检运行文案修正：体检在后台运行，关闭页面不影响完成
-- 体检完成后，「记忆图谱」页提示数据快照已过期、建议重新生成（此前无任何提示）
-- 体检失败提示改为通俗说明 + 重试/交给 AI 检查两条出路（此前显示退出码等技术信息）
+| 方案 | 实测结果 |
+|---|---|
+| 读者改用 `FILE_SHARE_DELETE` 打开 | **无效**：100/100 仍失败（`CreateFileW` err=0，模式生效但无帮助） |
+| 写入端有限重试（5~6 次 + 退避） | **无效**：读者持有期间 100/100 失败，且耗时从 0.38s 膨胀到 50s |
+| 消除读路径（给读加锁） | **不可行**：读操作本就该无锁并发（search / list / 外部客户端 DSH / MCP），加锁会毁掉并发性能 |
 
-### 修复 — 错误提示与无障碍
+根因机制：内置 `open()` 的共享模式是 `FILE_SHARE_READ|FILE_SHARE_WRITE`，它**不禁止**他人以 `GENERIC_WRITE` 打开（所以直接覆盖写能穿过），但**禁止**需要重命名/DELETE 语义的 `os.replace`。
 
-- 新增页面顶部错误横幅：连接失败、操作失败等错误常驻可见、可重试、可关闭（此前提示 2.4 秒即消失）
-- 导入确认弹窗的换行显示修复（此前显示字面 \n\n 字符）；超大文件（>256KB）错误提示改为中文说明
-- 组件开关支持键盘操作（Tab 聚焦 + 焦点环），此前键盘用户完全无法开关
-- 项目「补充现状」编辑入口补上（此前提示文字指向一个不存在的按钮）
-- 任务支持行内编辑：点击任务标题可修改内容、截止日期、所属项目（此前只能删除重建）；删除项目后遗留任务的所属项目徽章显示修复（此前完全透明不可见）
+### 验证
+
+- **同进程 A/B（因果确认）**：同一进程、同一时刻、交替顺序，仅切换降级函数 —— 启用降级 **30/30** 成功 vs 禁用降级（修复前行为）**4/30** 成功。不依赖"多跑几次没复现"这类弱证据。
+- 并发场景 12/12 全过；测试套件 15/15 全绿。
+- 降级写在 `workspace_lock` 内串行执行，无并发写者；无锁读者极小概率读到半截，`read_json` 会告警返回 `None`（不写回，无清库风险）。
+
+### 版本号
+
+- `sb_core.VERSION` 3.13.0 → 3.13.1
+
+### 同批修复 — 发布前审查发现（版本元数据 / 发布物脱敏）
+
+**1. 版本元数据漂移**
+
+- `superbrain version` 把发布日期硬编码为 `2026-08-06`，随版本迭代漂移了 5 个小版本才被发现；features 描述停留在 v3.2 时代，完全没提 v3.11/v3.12 新增的 gating、forgetting、consolidation、workbench。
+- 修复：新增 `sb_core.RELEASE_DATE` 作为单点来源，CLI 改为引用（与 `VERSION` 同源）；features 行补齐。
+- 加测试锁死：`test_p1.py` 新增 **T6 版本元数据一致性** 四项 —— 含**反向断言**（CLI 源码中不得再出现硬编码的 `Release date: "..."`）。这类漂移的根因是「同一事实存了两份」，所以测试必须同时正向查权威源、反向查硬编码。
+
+**2. 发布物 PII / 内部信息**
+
+| 文件 | 问题 | 处理 |
+|---|---|---|
+| `sb_forgetting.py` | `EXEMPT_ENTITIES` 含作者真实姓名 | 收敛为通用词（`user` / `super-brain` / `超脑`），保留注释说明「按需自行增删」 |
+| `test_forgetting.py` | 测试夹具复用同一真实姓名作 entity | 换为 `user`；并**新增对照组** `test_non_exempt_entity_decays`（60 天不活跃的普通实体应降到 0.5 权重）—— 防止将来把豁免集误写成「全部豁免」 |
+| `sb_workbench.py` | `_seed_board()` 首次播种作者真实项目名 / 域名 / 待办 | 改为中性示例看板（示例项目 A/B + 引导文案），用户首次打开即知可改 |
+| `CHANGELOG.md` | 出现作者工作区名与姓名 | 改为「作者主工作空间」等中性表述 |
+
+**3. 发布副本预检基建**
+
+- 新增 `prepublish_superbrain_v3131.py`：复制发布副本（排除 `__pycache__` / `*.bak*` / `_bak_*` / `sb_smoke_*`）→ 跑 `prepublish_strip_local_paths.py --apply` → 安全复扫（区分**阻断项**与**人工核验过的豁免项**）→ 版本一致性检查 → 打包。
+- **关键教训**：发布副本必须放在**中性路径**。首次把副本放在作者的 vault 内（某个含 `.workbuddy` 的目录树之下），`sb_core.resolve_workspace()` 从 cwd 向上爬到宿主 `.workbuddy`，把 workspace 解析成**作者的生产工作空间**，导致 `test_superbrain` 6 项失败（读到真实记忆数）；挪到系统临时目录后 49/49 全过。**在含 `.workbuddy` 的目录树下跑超脑测试，测的不是测试库。**
 
 ### 测试
 
-- 交互回归 18/18 通过（Playwright 驱动真实浏览器：删除确认、行内编辑、开关装卸、体检全链路、移动端触控目标）；语法检查 Python + JS 双绿
+- 15 个测试文件全绿（在发布副本上跑，非活目录）
+- `test_p1` **19 → 23**（+T6 四项）、`test_forgetting` **23 → 24**（+对照组）
+- 发布包 `super-brain-3.13.1.zip`：54 文件，扁平结构，CRC 校验通过，零杂项
+
+
+## v3.13.0 (2026-09-11) — 移除硬步骤门控（入口拦截 → 出口信号）
+
+### 移除 — 硬步骤门控全部设施
+
+- 删除 `sb_gating.py` 中 `enforce_hard_step_guard` / `mark_search_done` / `_hardstep_load` / `_hardstep_save` / `HARDSTEP_STATE_FILE` / `HARDSTEP_WINDOW_SECONDS` / `HARDSTEP_OVERRIDES_MAX`（原 708–815 行，-90 行）
+- 删除 `superbrain.py` 中 4 处调用（`memory add` / `memory search` / `auto-store` / `longterm ingest`）与 1 处 import 段（-10 行）
+- 删除状态文件 `DEFAULT_DATA_DIR/.hardstep.json`（16KB，含 50+ 条 overrides，无任何消费方）
+- `--force` 参数在三命令上保留但降级为 no-op（避免破坏既有调用方），help 文本标注已废弃
+
+### 依据 — 三项实测
+
+1. **可绕过**：`.hardstep.json` 遗留 50+ 条 `--force` 审计记录（2026-07-10 ~ 08-31）。二元动作型指标必然退化，绕过成本仅四个字符。
+2. **已无约束力**：v3.9.7 起超窗场景已从 `exit 2` 改为「自动重置并放行」；且放行分支写 `last_search_query=""`，使后续 30 分钟内相关性检查（`if content and last_query`）全部跳过——一次超窗写入 = 30 分钟空白通行证。
+3. **收益远小于成本**：新增 `superbrain-bench/audit_island.py` 实测孤岛率（720 条 active 记忆）：全局 **0.6%** / 因果 7.4% / 固定窗口 10.9%；top-1 相似度均值 0.1496 = 随机配对基线（p95=0.0282）的 **14 倍**；孤岛集中在库早期（候选集小、无邻居可撞），属自然现象而非质量缺陷。
+
+### 负结果 — simhash 关联度检查被否决
+
+- 曾设计「入库时用 simhash 做关联度检查」——库内每条记忆已持久化 `simhash` 字段，判据成本仅 720 次 XOR，看似最优解。`superbrain-bench/calibrate_linkage.py` 实测否决：simhash top-1 均值 **0.72**、随机配对基线 p95 **0.63**，几乎无区分度；相对 TF-IDF 余弦孤岛判定 **kappa=0.043、precision=0.027**。
+- 结论：64 位 simhash 对「近重复」有效（`sb_memory` 的 0.92 阈值仍成立），对「中间相似度」无效。余弦判据在写入路径上成本约 1s/次（需 tokenize 全库），不可接受。
+
+### 替代方案
+
+- 质量信号移到**出口侧**：周期跑 `audit_island.py`，读**存量孤岛率** + **增量孤岛率**（近 30 天入库的记忆中，因果口径下仍为孤岛的比例）。存量只说明历史，增量才是可行动量。
+- 孤岛**不自动惩罚**，只做分流复核（部分记忆天然孤立）。
+
+### 测试
+
+- 15 个测试文件全绿：`test_p1` 19/19、`test_v36` 41/41、`test_v38` 35/35、`test_v310` 16/16、`test_consolidate` 26/26、`test_concurrent_writes` 通过（该用例对并发时序敏感，首轮偶发失败、复跑通过）
+- `test_p1.py` T1 由「门控 exit 2 / --force 豁免」改造为**回潮保护测试**：断言门控符号不再导出、CLI 层无残留调用。若未来重新引入入口拦截，测试会立即失败。
+
+### 版本号
+
+- `sb_core.VERSION` 3.12.1 → 3.13.0（修正长期落后 SKILL.md 三个小版本的不一致）
+
 
 ## v3.12.3 (2026-08-31) — 工作台体验五连升级（激励层+数据安全+暗色+移动端+微交互）
 
@@ -71,7 +135,7 @@
 - **对话即上板**：Agent 收尾直接写 `~/.workbuddy/super-brain/workbench_board.json`（首次播种真实项目，原子写，损坏 .corrupt.bak 重播种）；面板每 5s 轻量轮询 `GET /api/board/poll`（只读 board 零子进程），`updated_at` 变化局部刷新——Agent 写文件 → 面板 ≤5s 反映，输入聚焦/编辑态自动跳过
 - API：`POST /api/board` 单端点八 action（add/toggle/del_task、add/update/move_project/toggle_pin/del_project），输入校验（空标题拦截/非法日期置空/长度上限）
 
-### UI — 白盒子画廊语言（对标 a1m1ng.cn v8 设计 token）
+### UI — 白盒子画廊语言（对标作者个人作品集站 v8 设计 token）
 
 - 深色作品卡 hero（#1a1917 底暖白字琥珀 kicker）、mono 编号区块标题（01/02/03+朱砂红编号+细线）、衬线 900 标题（Noto Serif SC 栈）、卡片 16px 圆角+hover 抬升、徽章 mono 化
 - 朱砂红 #b84525（源自 v8）作为决策/逾期强调色引入；超脑琥珀压深 #D98A1F 提对比；两色分工：琥珀=行动/进行中，朱砂=需要决策/逾期
@@ -122,7 +186,7 @@
 - 全库 362 条 override 全为 demote 且 audit manual=0（不可溯源）；清除后候选池 225→563、晋升 8.9%（带内）、selfcheck 无新 issue
 - 备份：`memories.json.bak_20260831_clear_override`；清单：`superbrain-bench/results/clear_overrides_20260831.json`
 
-### 生产实测（workspace=AAA本地知识库v1）
+### 生产实测（作者主工作空间）
 
 - A×1（求职）+ B×0 + C×20（6412 字压缩）+ D×2（v3.7.2 发布误记、unknowns 原稿误记 supersede 链）应用；图谱 140 节点/276 边、general 48、整合候选 71→55
 - 30 题交付分：recall@5 **0.933 三连持平零回归** / mrr 0.808→0.792（仅「Skill 分档」单题 rank 1→2，仍命中）
@@ -234,7 +298,7 @@
 
 - 遗忘优先级 = 规模因子 S × (1 − 活跃度因子 A) × 记忆衰减因子 D，纯标准库、零新存储
 - 项目三档（按最后访问中位数分档）：active（≤14 天）/ warm（15–45 天）/ dormant（>45 天）
-- 软切降权：dormant 0.5 / warm 0.8 / active 1.0，身份/护栏记忆（砚/user/潜进/超脑等）永远豁免
+- 软切降权：dormant 0.5 / warm 0.8 / active 1.0，身份/护栏记忆（user/超脑等）永远豁免
 - CLI：`forgetting status`（项目档位 + 豁免统计）、`scan`（dry-run 候选预览）、`apply`（dormant 批量 demote，幂等）
 - 两天观察期验证：dormant 首次触发（RAG/Transformer 46 天滑过 45 天线）、降权不误伤强相关检索
 
