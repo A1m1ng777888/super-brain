@@ -25,7 +25,7 @@ from sb_core import (
     get_timestamp, read_memories, write_memories,
     read_graph, write_graph, read_meta, update_meta,
     get_health_dir, write_json, read_json, print_json, load_config,
-    get_workspace_dir, ensure_dir
+    get_workspace_dir, ensure_dir, resolve_workspace
 )
 from sb_search import find_duplicates, simhash, simhash_similarity
 from sb_memory import find_issues, get_stats as get_mem_stats
@@ -569,7 +569,7 @@ def run_full_check(workspace=None, auto_fix=False):
     """
     results = {
         "timestamp": get_timestamp(),
-        "workspace": workspace or "default",
+        "workspace": (workspace or resolve_workspace()),
         "checks": {},
         "overall_status": "healthy",
         "total_issues": 0,

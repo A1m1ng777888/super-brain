@@ -23,9 +23,9 @@ DEFAULT_DATA_DIR = os.path.expanduser(
 
 # v3.9.4: 单一版本号来源（修复 DEFAULT_CONFIG/三处兜底四处漂移的审阅 P1-4）
 # v3.13.0: 同步 bump（此前停留在 3.12.1，落后 SKILL.md 三个小版本）
-VERSION = "3.13.1"
+VERSION = "3.13.2"
 # v3.13.1: 发布日期同样单点化（此前 `version` 子命令硬编码 2026-08-06，随版本一起漂移）
-RELEASE_DATE = "2026-09-11"
+RELEASE_DATE = "2026-09-14"
 
 # v3.9.5 P2-9: warmup 常量统一来源（消除 sb_reasoning/sb_entanglement 重复定义）
 WARMUP_MEMORY_THRESHOLD = 15

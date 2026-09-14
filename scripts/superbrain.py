@@ -152,6 +152,50 @@ from sb_forgetting import (
 
 
 
+
+# ===== v3.13.2: category 拆键共存（2026-09-14 审计修复）=====
+# 背景：attributes.category 原被两类写入混用——机器类型分类（受控枚举）与
+#       用户自由主题标注（如「前端技术模式」「协作方法论」）。
+# 修复：机器语义留在 category（受控），用户自由文本改投 topic（开放）。
+# 兼容：--category 参数名不变；越界值自动转 topic，不报错、不丢失输入。
+#
+# 来源说明：下列 7 个值 = sb_memory.TYPE_DEFAULTS 各 type 的 category 值域
+#   （注意不是 TYPE_DEFAULTS 的「键」——键是记忆 type: fact/preference/...）。
+#   当前 TYPE_DEFAULTS 全库仅 1 处消费（sb_memory.py:178），无漂移风险，
+#   故此处保持字面量以便阅读；若未来新增 type 或改 category 值域，
+#   需同步本集合（grep 关键字：VALID_CATEGORIES）。
+VALID_CATEGORIES = {
+    "background",
+    "history",
+    "knowledge",
+    "personal",
+    "reasoning",
+    "social",
+    "work",
+}
+
+
+def _split_category(value):
+    """把 --category 的值分流到受控 category 或开放 topic。
+
+    返回 (attrs_fragment, notice)：
+      - 值在 VALID_CATEGORIES 内 -> {"category": value}, None
+      - 值越界                  -> {"topic": value}, 提示串（供 CLI 打印）
+
+    设计依据（2026-09-14 全量审计 P1-1）：用户决策走「拆键共存」——
+    既不限制自由主题标注，又让机器分类语义恢复受控。
+    """
+    v = (value or "").strip()
+    if not v:
+        return {}, None
+    if v in VALID_CATEGORIES:
+        return {"category": v}, None
+    notice = (
+        f'[note] category "{v}" 不在受控枚举内，已写入 topic（自由主题标注）。\n'
+        f"       受控枚举: {chr(44).join(sorted(VALID_CATEGORIES))}"
+    )
+    return {"topic": v}, notice
+
 def cmd_init(args):
     """Initialize SuperBrain data directory and default workspace."""
     ensure_workspace("default")
@@ -168,7 +212,10 @@ def cmd_memory_add(args):
     v3.8.0: supports --persona flag to write to persona workspace."""
     attrs = {}
     if args.category:
-        attrs["category"] = args.category
+        _frag, _notice = _split_category(args.category)
+        attrs.update(_frag)
+        if _notice:
+            print(_notice)
     if args.scope:
         attrs["scope"] = args.scope
     if args.tags:
@@ -247,7 +294,10 @@ def cmd_memory_update(args):
     """Update a memory."""
     attrs = None
     if args.category:
-        attrs = {"category": args.category}
+        _frag, _notice = _split_category(args.category)
+        attrs = dict(_frag)
+        if _notice:
+            print(_notice)
 
     updated = update_memory(
         args.id,

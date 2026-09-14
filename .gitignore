@@ -1,21 +1,24 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
+# Super Brain — 发布物忽略规则
 
-# 本地备份与快照（不应入库）
-_bak_*/
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 本地备份
 *.bak
 *.bak_*
-*.tmp.*
-*~
+_bak_*
 
-# 测试/冒烟残留
+# 临时 / 冒烟测试残留
 sb_smoke_*/
+*.tmp
 
-# 运行时数据（记忆库、图谱、配置）
-config.json
-workspaces/
-health/
-health_state.json
-*.log
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# 本地数据目录（超脑默认数据落用户家目录，不入库）
+super-brain-data/

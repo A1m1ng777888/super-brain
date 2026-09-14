@@ -1,5 +1,75 @@
 # Changelog — Super Brain 超脑
 
+## v3.13.2 (2026-09-14) — 全量审计修复：自检标签落盘 + category 拆键共存
+
+本版来自一次「线上发布版 vs 本机实际使用版」的全量审计（11 阶段 / 15 项检查 / 逐文件 git blob 比对）。
+线上 54/54 文件与本地逐字节一致，问题集中在**数据层与一处标签硬编码**，代码质量本身处于高水位。
+
+### 修复 1 — 自检报告 workspace 标签硬编码为 `default`（P0）
+
+- 症状：`selfcheck` 生成的 `health/latest_report.json` 中 `workspace` 字段恒为 `"default"`，
+  与真实作用域不符 —— 表现为「报告看不出是哪个空间的自检结果」。
+  该症状一度被外部观察误读为「守护层失焦、记录断档 13 天」。
+- 根因：`sb_selfcheck.py` 组装报告字典时把 `workspace` 写成了字面量 `"default"`，
+  而非调用 `resolve_workspace()` 求值。
+- 修复：引入 `resolve_workspace` 导入，字段改为 `(workspace or resolve_workspace())`（两行）。
+- 验证：落盘 `latest_report.json.workspace` = 当前空间名；`meta.json.last_self_check`
+  同步为本次自检时刻，全链一致。
+
+### 修复 2 — `--category` 自由文本无校验，与受控词表混用（P1）
+
+- 症状：`memory add --category <任意文本>` 会把自由文本（如"前端技术模式"）直接写进
+  `attributes.category`，与 `TYPE_DEFAULTS` 定义的 7 值受控词表混在同一字段，
+  导致该字段既非受控、又不可靠。
+- 修复：**拆键共存** —— `attributes.category` 只承载受控语义（7 值白名单），
+  自由文本主题走新增的 `attributes.topic`。
+- **CLI 兼容式**：`--category` 参数名与用法**完全不变**；值落在白名单 → 写 `category`；
+  越界 → 自动路由到 `topic` 并打印信息性提示（**不报错、不丢输入**）。
+  这样零学习成本、零破坏性，既有调用脚本无需改动。
+- 枚举来源加注释说明：7 值 = `TYPE_DEFAULTS` 各 type 的 `category` **值**（不是键）。当前
+  `TYPE_DEFAULTS` 在代码库中仅 1 处消费，无漂移风险，故保留字面量以便阅读。
+- 验证：隔离数据目录下运行时实测 —— 7 个受控值逐一写入均无误判；越界值正确落 `topic`；
+  历史 4 条越界记录已迁移，全库越界归零。
+
+### 修复 3 — `task_status` 覆盖不完整（P1）
+
+- 症状：`task` 类记忆中部分条目缺 `task_status` 字段。
+- 修复：按「`attributes.completed == True` → `completed`，否则 `active`」一次性回填历史数据。
+  该规则经数据分布检验后确定 —— 曾假设"可由顶层 `status` 推导"，被实测证伪
+  （现存值全为 `active`，与顶层 status 无关）。
+- 验证：全库 task 记忆 **112/112 = 100%** 覆盖。
+
+### 三条被实测否决的替代路（负结果存档，勿重复尝试）
+
+| 方案 | 实测结果 |
+|---|---|
+| 把导出目录当"隐私发布面"做脱敏 | **假修复**：该目录是 `obsidian export` 的产物，脱敏会被下次导出覆盖。真实风险在**该目录未被版本控制忽略**，正解是解除跟踪 + 加忽略规则 |
+| 直接删掉重复记忆条目 | **不采用**：`delete_memory` 是数组移除、不可回溯。审计场景不应销毁痕迹；改用降级 `status` |
+| 用 `memory merge` 清理近似重复 | **负面**：`merge_memories` 是**内容拼接**（`content + " [merged: " + ...]`），合并后重复度反而**更高** |
+
+### 一个关于"写入记忆库"的教训（值得所有使用者知道）
+
+向记忆库写入结论时，**替代关系必须走字段，不要靠新建条目表达**：
+
+- `--replaces` 会写 `replaces` / `replaced_by` 字段，但**不参与去重判定**（那是 simhash 的活）。
+  若在承载替代关系的条目里复制原文，必然触发自身的重复检测。
+- 重复检测的 scope 是 `status == "active"`，所以**降级状态（`archived`）是清退重复的合法手段**，
+  且保留可追溯历史 —— 这也是 `merge_memories` 自己采用的做法。
+- 字段能表达的语义（如 `replaced_by`）不要靠第三条条目重复表达。
+
+### 验证
+
+- 测试套件 **15/15 全绿**（每次代码改动后重跑，含 `test_p1` 23 项、`test_forgetting` 24 项）
+- 自检 12 项检查执行；`file_integrity` / `index_integrity` / `backup_freshness` / `timeliness` /
+  `temporal_validity` / `completeness` / `orphans` / `duplicates` 均 0 issues
+- 线上/本地逐文件 git blob SHA 比对：54/54 一致（修复前）
+
+### 版本号
+
+- `sb_core.VERSION` 3.13.1 → 3.13.2
+- `sb_core.RELEASE_DATE` 2026-09-11 → 2026-09-14
+- `SKILL.md` / `README.md` 声明面同步
+
 ## v3.13.1 (2026-09-11) — 修复跨进程并发写丢失（os.replace 降级路径）
 
 ### 修复 — Windows 上 os.replace 被并发读句柄阻塞
