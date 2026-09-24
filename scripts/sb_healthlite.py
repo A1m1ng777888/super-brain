@@ -32,6 +32,14 @@ Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
   - 报告治理：selfcheck 每次运行写全量 report_*.json，本脚本运行后
     清理 health 目录，只保留最近 30 个
 
+v3.14.0（运行史审计，信息雷达 2026-09-24 驱动）：
+  - 新增 --history 模式：audit_history() 对 health_history.json 做**消费侧**
+    执行节奏核查。起因：WorkBuddy 5.6.2 修复「定时任务无记录却反复执行」
+    暴露的盲区——调度类任务「执行了却没留痕 / 反复执行却无人察觉」。
+    health_history.json（v3.12.2 起）是生产侧留痕；本审计是缺失的另一半。
+  - 检出三类异常：守护停滞（距上次运行 > 2 天）、断档（相邻间隔 > 48h）、
+    疑似重复执行（相邻间隔 < 60min）。纯只读，恒退出码 0。
+
 Copyright (c) 2026 A1m1ng777888. Licensed under MIT.
 """
 
@@ -41,7 +49,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPTS)
@@ -201,6 +209,110 @@ def _append_history(state):
         os.replace(tmp, h_path)
     except OSError:
         pass
+
+
+def audit_history(days=30, history_path=None, now=None):
+    """运行史审计（v3.14.0）：对 health_history.json 做执行节奏核查（只读）。
+
+    调度类任务的盲区是「执行了却没留痕 / 反复执行却无人察觉」——
+    health_history.json 负责留痕（生产侧），本函数负责核查（消费侧）：
+      - 守护停滞：最近一次运行距现在 > STALL_DAYS 天
+      - 断档：相邻两次运行间隔 > GAP_HOURS 小时
+      - 疑似重复执行：相邻两次运行间隔 < DUP_MINUTES 分钟
+    文件缺失/损坏/条目畸形一律容错（视为空或跳过），绝不因审计而崩溃。
+    days 只看最近 N 天的条目；now 可注入（测试用），默认 utcnow。
+    返回 dict；status ∈ {"no_history", "ok", "warn"}。
+    """
+    STALL_DAYS = 2
+    GAP_HOURS = 48
+    DUP_MINUTES = 60
+    path = history_path or _history_path()
+    now = now or datetime.now(timezone.utc)
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            hist = json.load(f)
+        if not isinstance(hist, list):
+            hist = []
+    except (OSError, json.JSONDecodeError):
+        hist = []
+
+    entries = []
+    for h in hist:
+        if not isinstance(h, dict):
+            continue
+        try:
+            ts = datetime.fromisoformat(str(h.get("ts", "")))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue  # 畸形时间戳的条目跳过，不拖垮整条审计
+        entries.append((ts, h))
+    entries.sort(key=lambda x: x[0])
+    cutoff = now - timedelta(days=days)
+    entries = [e for e in entries if e[0] >= cutoff]
+
+    result = {
+        "window_days": days,
+        "n_runs": len(entries),
+        "first_ts": None,
+        "last_ts": None,
+        "days_since_last": None,
+        "gaps": [],
+        "duplicates": [],
+        "status": "ok",
+        "notes": [],
+    }
+    if not entries:
+        result["status"] = "no_history"
+        result["notes"].append("窗口内无运行记录（守护未运行或历史为空）")
+        return result
+
+    result["first_ts"] = entries[0][0].isoformat()
+    result["last_ts"] = entries[-1][0].isoformat()
+    result["days_since_last"] = round((now - entries[-1][0]).total_seconds() / 86400, 2)
+
+    for (t1, _), (t2, _) in zip(entries, entries[1:]):
+        delta_h = (t2 - t1).total_seconds() / 3600
+        if delta_h > GAP_HOURS:
+            result["gaps"].append({
+                "from": t1.isoformat(), "to": t2.isoformat(),
+                "gap_hours": round(delta_h, 1)})
+        elif delta_h * 60 < DUP_MINUTES:
+            result["duplicates"].append({
+                "ts1": t1.isoformat(), "ts2": t2.isoformat(),
+                "interval_min": round(delta_h * 60, 1)})
+
+    if result["days_since_last"] > STALL_DAYS:
+        result["notes"].append(
+            f"守护停滞：距上次运行 {result['days_since_last']} 天（阈值 {STALL_DAYS}）")
+    if result["gaps"]:
+        result["notes"].append(f"断档 {len(result['gaps'])} 处（间隔 > {GAP_HOURS}h）")
+    if result["duplicates"]:
+        result["notes"].append(
+            f"疑似重复执行 {len(result['duplicates'])} 处（间隔 < {DUP_MINUTES}min）")
+    if result["notes"]:
+        result["status"] = "warn"
+    return result
+
+
+def print_audit(result):
+    """--history 模式的终端输出（对齐现有 print 风格）。"""
+    if result["status"] == "no_history":
+        print(f"[sb_healthlite] 运行史审计（最近 {result['window_days']} 天）："
+              "无运行记录——守护未运行或历史为空")
+        return
+    print(f"[sb_healthlite] 运行史审计（最近 {result['window_days']} 天）")
+    print(f"  运行 {result['n_runs']} 次 | 首次 {result['first_ts'][:10]} | "
+          f"最近 {result['last_ts'][:10]}（{result['days_since_last']} 天前）")
+    for g in result["gaps"]:
+        print(f"  [warn] 断档：{g['from'][:16]} → {g['to'][:16]}"
+              f"（{g['gap_hours']}h）")
+    for d in result["duplicates"]:
+        print(f"  [warn] 疑似重复：{d['ts1'][:16]} 与 {d['ts2'][:16]}"
+              f"（间隔 {d['interval_min']}min）")
+    print(f"  状态：{result['status']}" +
+          (f"（{'; '.join(result['notes'])}）" if result["notes"] else ""))
 
 
 def _gating_readonly(workspace):
@@ -403,7 +515,16 @@ def main():
                     help="计划任务模式：正常时零输出")
     ap.add_argument("--consolidate", action="store_true",
                     help="追加 L1 整合提案生成（只读，永不自动 apply）")
+    ap.add_argument("--history", action="store_true",
+                    help="运行史审计（v3.14.0）：核查守护执行节奏（断档/停滞/重复），"
+                         "只读，不取锁，恒退出码 0")
+    ap.add_argument("--days", type=int, default=30,
+                    help="--history 的回望窗口天数（默认 30）")
     args = ap.parse_args()
+
+    if args.history:  # 只读审计：不取锁，不与守护实例互相干扰
+        print_audit(audit_history(days=max(args.days, 1)))
+        return 0
 
     lock = _acquire_lock()
     if lock is None:
