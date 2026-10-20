@@ -33,7 +33,7 @@ git clone https://github.com/A1m1ng777888/super-brain.git
 cd super-brain
 
 python scripts/superbrain.py init
-python scripts/superbrain.py memory add --type fact "你的第一条记忆" --entity demo
+python scripts/superbrain.py memory add --content "你的第一条记忆" --type fact --entity demo
 python scripts/superbrain.py memory search "记忆"
 python scripts/superbrain.py stats
 ```
