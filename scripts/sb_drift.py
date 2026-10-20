@@ -63,7 +63,7 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from sb_core import get_workspace_dir, read_json
+    from sb_core import get_workspace_dir, read_json, load_config
 except Exception as exc:  # pragma: no cover - 环境缺失时给出明确提示
     sys.stderr.write(f"[sb_drift] 无法导入 sb_core: {exc}\n")
     raise
@@ -170,10 +170,20 @@ def detect(workspace=None, repo_root=None, limit=10):
     edges = graph.get("edges") or {}
 
     if repo_root is None:
-        # 默认基准优先级：显式环境变量 > 当前工作目录。
-        # 刻意不硬编码任何作者本地路径——发布物必须 path-free（脱敏要求）。
+        # 默认基准优先级（不硬编码任何作者路径——发布物必须 path-free）：
+        #   1) 环境变量 SUPERBRAIN_REPO_ROOT
+        #   2) config.obsidian_vault_path 的父目录（vault 的上一层即仓库根）
+        #   3) 当前工作目录
+        # ⚠️ 第 2 条是必需的：sb_healthlite 调 detect() 时不传 repo_root，
+        #    若退化为 cwd，守护在任意目录被触发都会把路径检查基准指错，
+        #    实测 STALE 从 8 暴涨到 100（92 条假阳性，2026-10-20 v3.15.1 修复）。
         env_root = os.environ.get("SUPERBRAIN_REPO_ROOT")
-        repo_root = env_root if (env_root and os.path.isdir(env_root)) else os.getcwd()
+        if env_root and os.path.isdir(env_root):
+            repo_root = env_root
+        else:
+            vault = (load_config() or {}).get("obsidian_vault_path")
+            derived = os.path.dirname(os.path.abspath(vault)) if vault else None
+            repo_root = derived if (derived and os.path.isdir(derived)) else os.getcwd()
 
     active = [m for m in all_mem if m.get("status", "active") == "active"]
     active_ids = {m["id"] for m in active}
