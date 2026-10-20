@@ -344,6 +344,27 @@ def add_memory(content, mem_type="fact", entity=None, confidence=0.8,
             else:
                 write_memories(memories, workspace)
 
+    # v3.15.0 (2026-10-20)：守护停滞惰性提醒（零成本、只读一个文件）。
+    # 背景：schtasks 调度在某些环境不可用（沙箱黑名单实测），守护可能静默停摆
+    # 数月无人察觉。add_memory 是全部入库的单点入口，在此读 health_state.json
+    # 的 timestamp，超 3 天未更新就往 stderr 打一行提醒（不打断流程、不改数据）。
+    try:
+        _hs_path = os.path.join(sb_core.DEFAULT_DATA_DIR, "health_state.json")
+        if os.path.exists(_hs_path):
+            with open(_hs_path, "r", encoding="utf-8") as _f:
+                _hs = json.load(_f)
+            _ts = (_hs or {}).get("timestamp")
+            if _ts:
+                from datetime import datetime, timezone
+                _last = datetime.fromisoformat(str(_ts).replace("Z", "+00:00"))
+                _days = (datetime.now(timezone.utc) - _last).days
+                if _days >= 3:
+                    print(f"⚠ 健康守护已 {_days} 天未运行（health_state.json 停于 "
+                          f"{str(_ts)[:10]}）。跑一次 `SB healthlite` 可恢复体检。",
+                          file=sys.stderr)
+    except Exception:
+        pass  # 提醒失败绝不拖垮入库主路径
+
     return memory
 
 

@@ -129,11 +129,44 @@ def extract_key_points(text, max_points=5):
     """
     if not text or len(text.strip()) < 5:
         return []
-    
+
     # Sentence segmentation
-    sentences = re.split(r'[。！？.!?；;\n]+', text)
-    sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 2]
-    
+    # v3.15.0-dev 修复截断根因（2026-10-20，实测 8 条截断记忆反推）：
+    # 旧实现 `re.split(r'[。！？.!?；;\n]+', text)` 有两个系统性毛病：
+    #   ① 编号列表「...A 3. 下一条」的句点会把编号数字「3」残留在 A 的尾部
+    #      → 产出「安全区...防Premiere裁切 3」这类怪结尾
+    #   ② 版本号「0.1.1」被切成「版本 0」「1」「1」三段
+    # 修复顺序：先保护版本号/小数（点号换成占位符）→ 按标点切分 →
+    #           剥掉句尾孤立编号 → 恢复占位符。
+    # 零宽断言 (?<=\d)\.(?=\d) 只匹配「数字之间的点号」本身、不消费数字，
+    # 因此 0.1.1 的两个点都会被保护（消费式写法 (\d)\.(\d) 会漏掉第二个）。
+    _protected = re.sub(r"(?<=\d)\.(?=\d)", "\x00", text)
+    sentences = re.split(r'[。！？.!?；;\n]+', _protected)
+    cleaned = []
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        # 剥离句尾孤立编号（两种形态）：
+        #   形态A「空格 + 1~2 位数字」：...防Premiere裁切 3
+        #   形态B「冒号 + 1~2 位数字」：Remotion动画关键经验：1
+        # 条件：剥离后句子仍 ≥10 字符，避免误伤「版本 2」类合法短句。
+        m = re.search(r"\s(\d{1,2})$", s)
+        if m and len(s[:m.start()].strip()) >= 10:
+            s = s[:m.start()].strip()
+        m = re.search(r"[：:]\s*(\d{1,2})$", s)
+        if m:
+            head = s[:m.start()].strip()
+            # 「label：编号」结构剥离数字后只剩 label（如「Remotion动画关键经验」），
+            # label 不含信息量 → head 过短时整条丢弃；足够长才保留。
+            if len(head) >= 16:
+                s = head
+            else:
+                continue
+        if len(s) > 2:
+            cleaned.append(s)
+    sentences = [s.replace("\x00", ".") for s in cleaned]  # 恢复版本号点号
+
     if not sentences:
         return []
     

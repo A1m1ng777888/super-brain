@@ -1,4 +1,4 @@
-# 双轴代码审阅规范（Code Review Guide）— v3.9.8
+# 双轴代码审阅规范（Code Review Guide）— 引入版本 v3.9.8
 
 > 借鉴 mattpocock/skills `code-review` 技能，把 2026-07-14~15 GLM-5.2 外部审阅实验
 > 中验证有效的纪律固化为可复用资产。当对代码改动做审阅（自审/外审/发布前审查）时按此执行。

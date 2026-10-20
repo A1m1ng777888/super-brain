@@ -59,6 +59,10 @@ import sb_gating                                  # noqa: E402
 import sb_graph                                   # noqa: E402
 import sb_selfcheck                               # noqa: E402
 try:
+    import sb_drift                                # noqa: E402  v3.15.0 漂移四态（只读）
+except Exception:                                  # pragma: no cover
+    sb_drift = None                                # 独立部署缺文件时不拖垮 L0
+try:
     import sb_consolidate                          # noqa: E402  L1 整合（可选）
 except Exception:                                  # pragma: no cover
     sb_consolidate = None                          # 独立部署缺文件时不拖垮 L0
@@ -436,6 +440,43 @@ def run(workspace=DEFAULT_WORKSPACE, quiet=False, consolidate=False):
                            f"{g['band']}（候选 {g['n_candidates']}）")})
     except Exception as e:  # noqa: BLE001
         issues.append({"check": "gating", "severity": "error",
+                       "detail": f"{type(e).__name__}: {e}"})
+
+    # ---- 3.5 漂移四态（v3.15.0；只读，sb_drift 全程零写入） ----
+    # 设计意图：索引/图谱/记忆的「漂移」必须靠守护自动发现，靠纪律必漏
+    # （2026-10-20 实证：index.json 无定期机制，静默落后 2 个月）。
+    # 这里只把四态计数落进 health_state.json，不做任何修复动作——
+    # 「程序报事实，语义裁决权归人」（SKILL.md 语义/治理分工章节）。
+    try:
+        if sb_drift is not None:
+            drift = sb_drift.detect(workspace=workspace, limit=0)
+            ds = drift.get("summary", {})
+            state["drift"] = {
+                "stale": ds.get("stale", {}).get("total"),
+                "orphan": ds.get("orphan", {}).get("total"),
+                "missing": ds.get("missing", {}).get("total"),
+                "unbaselined": ds.get("unbaselined", {}).get("total"),
+                "path_basis_drift": (drift.get("path_basis") or {}).get("basis_drift_total"),
+                "index_lag": (drift.get("meta") or {}).get("index_lag"),
+            }
+            # index 滞后 = warn（自愈通道 longterm retrieve 会惰性追平，但提示人工留意）
+            if state["drift"]["index_lag"]:
+                issues.append({"check": "index_lag", "severity": "warn",
+                               "detail": f"索引滞后 {state['drift']['index_lag']} 条"
+                                         f"（memory_count 落后 active；跑 SB longterm index 追平）"})
+            # 漂移总量非零 = warn（不判语义，只报事实规模）
+            total = sum(v for v in (state["drift"]["stale"], state["drift"]["orphan"],
+                                    state["drift"]["missing"], state["drift"]["unbaselined"])
+                        if isinstance(v, int))
+            if total > 0:
+                issues.append({"check": "drift", "severity": "warn",
+                               "detail": f"漂移事实共 {total} 项（STALE {state['drift']['stale']} / "
+                                         f"ORPHAN {state['drift']['orphan']} / "
+                                         f"MISSING {state['drift']['missing']} / "
+                                         f"UNBASELINED {state['drift']['unbaselined']}；"
+                                         f"明细见 SB drift --json）"})
+    except Exception as e:  # noqa: BLE001
+        issues.append({"check": "drift", "severity": "error",
                        "detail": f"{type(e).__name__}: {e}"})
 
     # ---- 判定与落盘 ----

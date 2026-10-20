@@ -1,13 +1,13 @@
 ---
 name: super-brain
-version: v3.14.0
-released: 2026-09-24
+version: v3.15.0
+released: 2026-10-20
 author: A1m1ng777888
 license: MIT
-description: "Super Brain 超脑认知增强技能 v3.14.0。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。v3.9.6（自检评分优化）：gating_flood ratio 阈值 0.40→0.70、duplicates simhash 0.75→0.85、--fix 自动合并 0.95→0.85、task 默认 task_status=active、completeness 白名单扩展。v3.9.7（自动触发断裂链修复）：write_json 返回值补全消假警告、跨会话硬步骤死锁修复。v3.9.8（mattpocock 纪律库吸收）：decompose 曳光弹切片规格、frontier 拷问法、domain 项目术语表、双轴 code-review。v3.10.0（评分体系重构，Penguin 评测范式）：① 硬/软指标分域——软指标从扣分项改为报告项，总分只基于物理完整性+时效性+真损坏 ② 有效性协议——score_status 与分数正交 ③ 修复后验证——--fix 后硬分未提升则提示回滚。v3.11.0（遗忘治理引擎 + 检索增强）：① 新增 sb_forgetting 遗忘治理模块（规模×活跃度二维，active/warm/dormant 三档软切降权，dormant 0.5/warm 0.8/active 1.0，身份记忆豁免，forgetting status/scan/apply CLI）② 检索 entity 精确命中 boost——查询词命中记忆 entity 时优先召回，修复词面不重叠导致的漏召回 ③ 修复 v3.10.0 发布遗漏（sb_forgetting.py 未随包发布致 superbrain ImportError）。v3.11.1（DSH 审阅高位项修复）：① 门控容量持久执行——新增 _cap_enforce 执行器统一 get_active_workspace 与 chain_ignite 两条晋升路径，超容部分持久降级（可逆审计、无 override 残留），晋升洪水（95>cap50）根治 ② 自检索引格式兼容——check_file_integrity 兼容 v3.9.3+ 现行索引键（keyword_index/word_network_stats），file_integrity 假阳性消除 ③ find_duplicates TF-IDF 预计算——IDF doc_freq 表 + doc Counter 消除 O(n²·terms·doc_len) 退化（n=382 实测 ~235s→秒级，结果 bit 级一致）。v3.11.2（检索层重建，内部轮）：六通道 RRF 依据消融证据砍成 BM25 单路、_bm25_tokenize 修复 CJK 停用词主导、persona 合并单次检索（recall@1 0.200→0.700）、访问统计时点断裂修复、--dedupe 幂等写入开关。v3.12.0（P0-A→M 十四轮对抗性开发）：新增自动建图（graph build，entity 节点 + top-K scale-free 建边 + related_nodes 回填）、相对门控（get_threshold 双模式：meta 手动 / 默认自动=排名百分位，分布漂移免重标）、门控治理与写路径全量上锁、实体归一化、两轮对抗审阅修 6 处真 bug；实测检索 recall@1 0.200→0.700、门控洪水 137→50 根治、图谱 14→139 节点复活。v3.12.1（每日自检守护引擎，默认关闭）：新增 sb_healthlite.py L0 守护（graph build + selfcheck + 门控带内检查 → health_state.json，退出码分级 warn→0 / error→1、原子写 + 锁 pid 校验）+ schedule_manager.py（schtasks 用户级计划任务 install/uninstall/status，--time HH:MM 校验）；纯本地零 token 零联网，开关主通道=可视化工作台自动化组件面板（规划中，默认全关）。v3.12.2（工作台全线+阶段2 收官）：sb_consolidate.py 零 LLM 后台整合（A 归一/B 合并/C 压缩/D 知识更新链，proposal→apply 两段式永不自动 apply）、时态建模启用（valid_from 锚定+存量回填）、sb_workbench.py 本地工作台（易用性三区 IA+正在推进看板对话即上板+健康看板迁入双 Tab）、图谱增益消融（一阶段「差三项」全关闭）。v3.12.3（工作台体验五连升级）：R1 节奏条（完成率环+体检 streak 渐变式不归零+42 天热力图+项目进度条）、R2 看板导出 JSON/导入恢复（消毒+自动备份）、R3 暗色模式（CSS 变量+防闪白+?theme= 调试通道）、R4 移动端+iframe 高度自适应+局域网模式（--host 0.0.0.0 opt-in+_lan_ip 探测+Start-Workbench-LAN.bat）、R5 微交互基线（环动画/勾选 pop/spring 开关/键盘可达/prefers-reduced-motion）。v3.12.4（工作台易用性修复十二项）：删除确认与任务去向提示、开关失败真实反馈与键盘可达、错误常驻横幅、任务行内编辑（内容/截止日/所属项目）、体检后图谱快照过期提示、确认弹窗换行修复。v3.13.0（移除硬步骤门控）：删除入口拦截（enforce_hard_step_guard / mark_search_done / .hardstep.json），依据三项实测——可绕过（50+ 条 --force 记录）、已无约束力（v3.9.7 起只提示不拦截且放行分支清空 last_search_query 形成 30 分钟空白通行证）、收益远小于成本（孤岛率 0.6%~10.9%，top-1 相似度为随机基线 14 倍）；替代为出口侧孤岛率审计（audit_island.py）。负结果：simhash 关联度检查被否决（kappa=0.043）。--force 保留为 no-op。v3.13.1（并发写修复 + 发布审查整改）：① Windows os.replace 被并发读句柄阻塞抛 WinError 5 致记忆丢失（触发率约 12%），改为「原子写快路径 + 冲突降级为备份→覆盖→校验→回滚」；读者 FILE_SHARE_DELETE、写入端重试、给读加锁三条替代路均实测否决；同进程 A/B 确认 30/30 vs 4/30。② 版本元数据单点化（sb_core.RELEASE_DATE），修掉 CLI 硬编码 Release date 漂移 5 个版本的问题，加 T6 反向断言锁死。③ 发布物脱敏（EXEMPT_ENTITIES / _seed_board 移除作者个人信息，测试夹具通用化并加对照组）。纯标准库零依赖。v3.14.0（healthlite 运行史审计，信息雷达驱动）：新增 audit_history() + --history/--days CLI——对 health_history.json 做消费侧执行节奏核查，检出守护停滞（>2 天）/断档（>48h）/疑似重复执行（<60min）三类异常；只读不取锁、恒退出码 0、文件缺失损坏容错；配套 test_healthlite_audit.py 12 项。"
+description: "Super Brain 超脑认知增强技能 v3.15.0。v3.8 系列：双层 Workspace 架构（persona + project）、RRF 秩融合检索、知识图谱 Mermaid 导出、GWT 门控层、Karpathy 认知 OS 蒸馏。v3.9 系列（GLM-5.2 外部审阅里程碑）：跨 15 个核心模块发现并修复 40+ 真实缺陷。v3.9.4（P0 性能修复）：搜索 15-35 倍提速、零成本索引自动维护、测试隔离。v3.9.5（P1+P2 系统性修复）：硬步骤门控原子写+未来时间拒绝+策略下沉、并发写 tmp.pid、read_json 二进制防护、token_roi XSS 转义、warmup 常量共享、读路径写副作用默认关、分层依赖注释、发布面脱敏扩大。v3.9.6（自检评分优化）：gating_flood ratio 阈值 0.40→0.70、duplicates simhash 0.75→0.85、--fix 自动合并 0.95→0.85、task 默认 task_status=active、completeness 白名单扩展。v3.9.7（自动触发断裂链修复）：write_json 返回值补全消假警告、跨会话硬步骤死锁修复。v3.9.8（mattpocock 纪律库吸收）：decompose 曳光弹切片规格、frontier 拷问法、domain 项目术语表、双轴 code-review。v3.10.0（评分体系重构，Penguin 评测范式）：① 硬/软指标分域——软指标从扣分项改为报告项，总分只基于物理完整性+时效性+真损坏 ② 有效性协议——score_status 与分数正交 ③ 修复后验证——--fix 后硬分未提升则提示回滚。v3.11.0（遗忘治理引擎 + 检索增强）：① 新增 sb_forgetting 遗忘治理模块（规模×活跃度二维，active/warm/dormant 三档软切降权，dormant 0.5/warm 0.8/active 1.0，身份记忆豁免，forgetting status/scan/apply CLI）② 检索 entity 精确命中 boost——查询词命中记忆 entity 时优先召回，修复词面不重叠导致的漏召回 ③ 修复 v3.10.0 发布遗漏（sb_forgetting.py 未随包发布致 superbrain ImportError）。v3.11.1（DSH 审阅高位项修复）：① 门控容量持久执行——新增 _cap_enforce 执行器统一 get_active_workspace 与 chain_ignite 两条晋升路径，超容部分持久降级（可逆审计、无 override 残留），晋升洪水（95>cap50）根治 ② 自检索引格式兼容——check_file_integrity 兼容 v3.9.3+ 现行索引键（keyword_index/word_network_stats），file_integrity 假阳性消除 ③ find_duplicates TF-IDF 预计算——IDF doc_freq 表 + doc Counter 消除 O(n²·terms·doc_len) 退化（n=382 实测 ~235s→秒级，结果 bit 级一致）。v3.11.2（检索层重建，内部轮）：六通道 RRF 依据消融证据砍成 BM25 单路、_bm25_tokenize 修复 CJK 停用词主导、persona 合并单次检索（recall@1 0.200→0.700）、访问统计时点断裂修复、--dedupe 幂等写入开关。v3.12.0（P0-A→M 十四轮对抗性开发）：新增自动建图（graph build，entity 节点 + top-K scale-free 建边 + related_nodes 回填）、相对门控（get_threshold 双模式：meta 手动 / 默认自动=排名百分位，分布漂移免重标）、门控治理与写路径全量上锁、实体归一化、两轮对抗审阅修 6 处真 bug；实测检索 recall@1 0.200→0.700、门控洪水 137→50 根治、图谱 14→139 节点复活。v3.12.1（每日自检守护引擎，默认关闭）：新增 sb_healthlite.py L0 守护（graph build + selfcheck + 门控带内检查 → health_state.json，退出码分级 warn→0 / error→1、原子写 + 锁 pid 校验）+ schedule_manager.py（schtasks 用户级计划任务 install/uninstall/status，--time HH:MM 校验）；纯本地零 token 零联网，开关主通道=可视化工作台自动化组件面板（规划中，默认全关）。v3.12.2（工作台全线+阶段2 收官）：sb_consolidate.py 零 LLM 后台整合（A 归一/B 合并/C 压缩/D 知识更新链，proposal→apply 两段式永不自动 apply）、时态建模启用（valid_from 锚定+存量回填）、sb_workbench.py 本地工作台（易用性三区 IA+正在推进看板对话即上板+健康看板迁入双 Tab）、图谱增益消融（一阶段「差三项」全关闭）。v3.12.3（工作台体验五连升级）：R1 节奏条（完成率环+体检 streak 渐变式不归零+42 天热力图+项目进度条）、R2 看板导出 JSON/导入恢复（消毒+自动备份）、R3 暗色模式（CSS 变量+防闪白+?theme= 调试通道）、R4 移动端+iframe 高度自适应+局域网模式（--host 0.0.0.0 opt-in+_lan_ip 探测+Start-Workbench-LAN.bat）、R5 微交互基线（环动画/勾选 pop/spring 开关/键盘可达/prefers-reduced-motion）。v3.12.4（工作台易用性修复十二项）：删除确认与任务去向提示、开关失败真实反馈与键盘可达、错误常驻横幅、任务行内编辑（内容/截止日/所属项目）、体检后图谱快照过期提示、确认弹窗换行修复。v3.13.0（移除硬步骤门控）：删除入口拦截（enforce_hard_step_guard / mark_search_done / .hardstep.json），依据三项实测——可绕过（50+ 条 --force 记录）、已无约束力（v3.9.7 起只提示不拦截且放行分支清空 last_search_query 形成 30 分钟空白通行证）、收益远小于成本（孤岛率 0.6%~10.9%，top-1 相似度为随机基线 14 倍）；替代为出口侧孤岛率审计（audit_island.py）。负结果：simhash 关联度检查被否决（kappa=0.043）。--force 保留为 no-op。v3.13.1（并发写修复 + 发布审查整改）：① Windows os.replace 被并发读句柄阻塞抛 WinError 5 致记忆丢失（触发率约 12%），改为「原子写快路径 + 冲突降级为备份→覆盖→校验→回滚」；读者 FILE_SHARE_DELETE、写入端重试、给读加锁三条替代路均实测否决；同进程 A/B 确认 30/30 vs 4/30。② 版本元数据单点化（sb_core.RELEASE_DATE），修掉 CLI 硬编码 Release date 漂移 5 个版本的问题，加 T6 反向断言锁死。③ 发布物脱敏（EXEMPT_ENTITIES / _seed_board 移除作者个人信息，测试夹具通用化并加对照组）。纯标准库零依赖。v3.14.0（healthlite 运行史审计，信息雷达驱动）：新增 audit_history() + --history/--days CLI——对 health_history.json 做消费侧执行节奏核查，检出守护停滞（>2 天）/断档（>48h）/疑似重复执行（<60min）三类异常；只读不取锁、恒退出码 0、文件缺失损坏容错；配套 test_healthlite_audit.py 12 项。v3.15.0（记忆漂移四态 + 语义/治理分工 + 截断根因修复，借鉴 AOCI-CODE）：①新增 sb_drift.py 与 SB drift 子命令——STALE（引用文件不存在/替换链断裂/有效期已过）/ ORPHAN（实体无节点/节点无记忆/边端点缺失）/ MISSING（高频实体未建节点/声称产出的文件缺失）/ UNBASELINED（无 provenance / inferred）四态，全程只读（SHA-256 字节比对验证零写入），退出码 1=有漂移供 cron 消费；②sb_reasoning.extract_key_points 修复截断根因——零宽断言保护 (?<=\d)\.(?=\d) + 句尾孤立编号剥离（空格型/冒号型，label-only 整条丢弃）；③sb_healthlite 集成 drift 只读计数（index_lag / 漂移总量 warn）；④sb_memory.add_memory 加守护停滞惰性提醒（health_state.json 超 3 天未更新→stderr 提醒）；⑤SKILL.md 新增「语义 / 治理分工」章节：模型写 content/entity/type/confidence，程序只管 id/时间戳/哈希/索引一致性/原子写，含 4 条「程序禁止代写语义」硬红线与绿灯三红线。"
 ---
 
-# Super Brain (超脑) — 认知增强技能 v3.14.0
+# Super Brain (超脑) — 认知增强技能 v3.15.0
 
 ## 概述
 
@@ -293,6 +293,70 @@ Persona workspace 是 AI 助手的**常驻身份记忆层**——跨项目始终
 - **编排层**（v3.2 新增，v3.3 增强）：子Agent编排器（复杂度评估→任务分解→规格生成→Goal Continuation 续跑→生命周期追踪）
 - **自愈层**：自检系统（v3.4.0 9项指标：3项物理+6项逻辑，修复前自动备份）、SkillOpt 自我进化、执行轨迹记录
 - **存储层**：Workspace 隔离、三进制哈希索引、JSON 文件存储、倒排索引
+
+## 语义 / 治理分工（2026-10-20 定稿，借鉴 AOCI-CODE）
+
+> 来源：AOCI-CODE 的 "the model owns semantics, not filenames, paths, AST branches, templates"
+> 与「程序只做治理」硬边界（`spec/public/aoci-object-fras-v2.txt`）。
+> 调研全文见 `本地知识库v1/调研笔记/AOCI-CODE深度研究_20261020.md`。
+
+**分工铁律：语义归模型，治理归程序。两者不得越界。**
+
+| 归属 | 具体职责 | 判定标准 |
+|---|---|---|
+| **模型（砚）** | `content` 正文、`entity` 命名、`type` 判定、`confidence` 赋值、`attributes` 业务含义、矛盾识别与改写 | 需要「读懂内容才能决定」的一切 |
+| **程序** | `id` / `timestamp` / `simhash` / `ternary_hash` / `salience` 计算 / `status` 状态机 / 索引一致性 / 图谱边权 / 文件原子写 | 用确定性算法可算、可校验、可复算的一切 |
+
+### 🚫 程序禁止代写语义（硬红线）
+
+程序**不得**从文件名、路径、字段名、正则模板、统计特征中「猜」出下列内容的含义并写进记忆：
+
+- 一条记忆的职责是什么（`content` 必须由模型读完证据后写）
+- 两个实体之间是什么关系（`graph` 边类型由模型判定，程序只按模型给的 entity 建节点）
+- 某条旧记忆是否与新信息矛盾（程序只能报告「相似度低/共享实体」等事实，不能裁定谁对）
+- 「机械草稿 + 模型润色」也属违规——半生成的内容极易夹带幻觉
+
+**允许程序做的语义相关动作**：聚类、去重候选、相似度打分、按 `entity` 建节点/连边、统计词频。这些产出是**线索**，不是**结论**。
+
+### 绿灯三红线（借自 AOCI 的治理教训，2026-10-20 社区实证）
+
+机器报「全绿」时，只证明下列三件事之一，**绝不等于整体正确**：
+
+1. **结构有效** ≠ 语义正确 —— 字段齐全、JSON 可解析，不代表写的内容对
+2. **治理合同成立** ≠ 治理闭环 —— AOCI issue #92 实证：verify/check 全绿但 47 项永久卡在 `pending_curation` 无裁决出口
+3. **回执成功** ≠ 动作生效 —— AOCI issue #113 实证：`applied` receipt 与实际状态不一致
+
+→ 任何 `selfcheck` / `healthlist` / `drift` 报绿，对外表述必须加限定语：「结构与治理校验通过，语义仍需人工/测试验收」。
+
+### 漂移四态体检（`sb_drift.py`，只读）
+
+```bash
+# 人读报告
+python sb_drift.py --workspace "my-workspace"
+# JSON（供看板/守护消费）
+python sb_drift.py --json --limit 0
+# 只报不中断（交互用）
+python sb_drift.py --no-fail
+```
+
+四态口径（对应 AOCI 的 Missing / Orphan / Stale / Unbaselined）：
+
+| 态 | 超脑口径 | 判定手段 |
+|---|---|---|
+| **STALE** | 记忆引用的文件不存在 / 替换链断裂 / valid_until 已过 | 四基准交叉文件存在性（repo_root / vault / stripped 两种） |
+| **ORPHAN** | entity 无图谱节点 / 节点无记忆 / 边端点缺失 | 集合差集 |
+| **MISSING** | ≥2 条记忆的高频实体未建节点 / 声称已产出的文件不存在 | 集合差集 + 交付动词正则 |
+| **UNBASELINED** | 无 `provenance` 字段 / `provenance=inferred` | 字段值统计 |
+
+**只读保证**：脚本对 `memories.json` / `graph.json` / `index.json` 零写入，已用 SHA-256 字节比对验证（2026-10-20）。
+**退出码**：0=无漂移 / 1=有漂移（供 cron 消费）。
+
+> ⚠️ **实测结论（2026-10-20，992 条 active）**：
+> - `confidence` 字段**无区分度**（median 0.9，仅 1 条 <0.7）→ **判可信度只能看 `provenance`**
+> - 路径判定必须多基准交叉：单基准会把 6 条「记法不统一」误报成「文件丢失」（46% 假阳性）
+> - 「短记忆 = 低质量」**不成立**：0-60 字区间的防错词占比仅 5.2%，而 400-1000 字区间达 62.3%；
+>   但短记忆里精品与碎片混杂（如「SVG transform 与 CSS transform 冲突需拆 inner wrapper」是典型 S 类），
+>   **不能用长度做质量判据**
 
 ## 初始化
 
@@ -611,6 +675,17 @@ input_schema:
 
 ## 命令参考
 
+### v3.15.0-dev 新增命令（记忆漂移四态，只读）
+
+| 命令 | 用途 |
+|------|------|
+| `drift` | 四态体检（STALE/ORPHAN/MISSING/UNBASELINED），人读报告 |
+| `drift --json --limit 0` | 全量 JSON（供看板/守护消费） |
+| `drift --out report.md` | 同时落盘 markdown 报告 |
+| `drift --no-fail` | 恒退出 0（交互场景）；默认有漂移退出 1 |
+
+> 详见「语义 / 治理分工」章节的四态口径表与实测结论。
+
 ### v3.6.0 新增命令（全局工作空间门控层）
 
 | 命令 | 用途 |
@@ -823,6 +898,9 @@ input_schema:
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v3.15.0-dev** | **2026-10-20** | **记忆漂移四态 + 语义/治理分工定稿（借鉴 AOCI-CODE）：** 新增 `sb_drift.py` 与 `SB drift` 子命令——STALE（引用文件不存在/替换链断裂/有效期已过）/ ORPHAN（实体无节点/节点无记忆/边端点缺失）/ MISSING（高频实体未建节点/声称产出的文件缺失）/ UNBASELINED（无 provenance / inferred）四态，全程只读（SHA-256 字节比对验证零写入），退出码 1=有漂移供 cron 消费。**三处被实测推翻的自造指标必须记住**：①「短记忆=废话」不成立（0-60 字区防错词仅 5.2%，400-1000 字区达 62.3%，但短记忆里 S 类精品与碎片混杂，长度不可作质量判据）；②单基准路径判定会把 6/13 条「记法不统一」误报成「文件丢失」（46% 假阳性）→ 改四基准交叉；③`confidence` 字段无区分度（median 0.9、仅 1 条 <0.7）→ 判可信度只看 `provenance`。同时新增 SKILL.md「语义/治理分工」章节：模型写 content/entity/type/confidence，程序只管 id/时间戳/哈希/索引一致性/原子写，并列出「程序禁止代写语义」硬红线与「绿灯三红线」。`main()` 改为 `sys.exit(args.func(args) or 0)` 以支持子命令退出码（其余命令返回 None 行为不变）。（其余命令返回 None 行为不变）。
+
+**同日追加（二次执行，17:30-17:45）**：②`sb_reasoning.extract_key_points` 修复截断根因——旧句点切分把编号列表残留数字到前句尾（「…裁切 3」）、版本号 `0.1.1` 切碎；改零宽断言保护 `(?<=\d)\.(?=\d)` + 句尾孤立编号剥离（空格型/冒号型，label-only 整条丢弃），7/7 回归通过。③`sb_healthlite` 集成 drift（只读计数进 health_state.json，index_lag/漂移总量 warn）——实证 graph build 本身就是漂移修复器（守护一次运行把 ORPHAN 72→21、MISSING 17→4）。④`sb_memory.add_memory` 加守护停滞惰性提醒（health_state.json 超 3 天未更新→stderr 提醒，零成本不阻断）；schtasks 被沙箱黑名单（PROGRAM BLOCKED BY SECURITY POLICY），守护调度需用户手动装。⑤存量清理：归档 9 条确定性缺陷（6 教科书测试数据 + 2 label-only 截断碎片 + 1 临时测试；备份 backups/memories_pre_drift_cleanup_20261020.json；active 994→985 核验通过）；索引追平 985。 |
 | **v3.14.0** | **2026-09-24** | **healthlite 运行史审计（信息雷达驱动）：** 新增 `audit_history()` + `--history`/`--days` CLI——对 `health_history.json` 做消费侧执行节奏核查，检出守护停滞（>2 天）/断档（>48h）/疑似重复执行（<60min）三类异常；只读不取锁、恒退出码 0、文件缺失/损坏/畸形条目全容错。起因：WorkBuddy 5.6.2 修复「定时任务无记录却反复执行」暴露调度盲区（信息雷达 09-24 简报）。真实数据首次冒烟即命中：healthlite 自 08-31 后无运行记录。新增 `test_healthlite_audit.py`（12 项），16 套件全绿。纯标准库零依赖，不动检索常量。 |
 | **v3.13.1** | **2026-09-11** | **修复跨进程并发写丢失 + 发布前审查整改**：① Windows 上 `os.replace` 被并发读句柄阻塞抛 WinError 5，导致 `add_memory` 事务失败、记忆丢失（真实触发率约 12%，是 `test_concurrent_writes` 间歇失败的根因）。修复=保留原子写为快路径、冲突时降级为「备份→覆盖→校验→回滚」。三条替代路被实测否决：读者 `FILE_SHARE_DELETE` 无效（100/100）、写入端重试无效（100/100 且耗时 0.38s→50s）、给读加锁不可行。同进程 A/B 因果确认：启用降级 30/30 vs 禁用 4/30。② 版本元数据单点化——`superbrain version` 的 `Release date` 曾硬编码为 2026-08-06（漂移 5 个小版本），新增 `sb_core.RELEASE_DATE`，features 行补齐 gating/forgetting/consolidation/workbench，并加 T6 反向断言锁死。③ 发布物脱敏——`EXEMPT_ENTITIES` 与 `_seed_board()` 移除作者个人信息，测试夹具通用化并加对照组。④ 新增发布副本预检脚本。测试 15 文件全绿；`test_p1` 19→23、`test_forgetting` 23→24。**教训：在含 `.workbuddy` 的目录树下跑超脑测试，测的不是测试库**（`resolve_workspace()` 会爬到宿主项目）。 |
 | **v3.13.0** | **2026-09-11** | **移除硬步骤门控（入口拦截 → 出口信号）**：删除 `enforce_hard_step_guard` / `mark_search_done` / `.hardstep.json` 状态机（`sb_gating.py` −90 行、`superbrain.py` −10 行）。依据三项实测：① 遗落 50+ 条 `--force` 绕过记录（二元动作指标必然退化）；② 自 v3.9.7 起实际只提示不拦截，且放行分支清空 `last_search_query` 使后续相关性检查全部失效；③ 孤岛率仅 0.6%~10.9%，top-1 相似度为随机配对的 14 倍。负结果：simhash 关联度检查被实测否决（kappa=0.043）。替代=出口侧孤岛率审计（`superbrain-bench/audit_island.py`）。`--force` 保留为 no-op。15 测试文件全绿，T1 改造为回潮保护测试。|

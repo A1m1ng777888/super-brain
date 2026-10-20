@@ -609,6 +609,34 @@ def cmd_graph_mermaid(args):
     print(graph_to_mermaid(workspace=args.workspace, direction=args.direction))
 
 
+def cmd_drift(args):
+    """记忆漂移四态体检（v3.15，只读，2026-10-20 借鉴 AOCI）。
+
+    刻意不在本函数内做任何写盘动作：sb_drift 全程只读，报告落盘只走 --out。
+    「程序只报事实，语义裁决权归人」——这是 AOCI 治理分工在超脑侧的落地。
+    """
+    import sb_drift  # 延迟导入：drift 不是高频路径，避免拖慢 CLI 启动
+
+    state = sb_drift.detect(
+        workspace=args.workspace,
+        repo_root=args.repo_root,
+        limit=args.limit,
+    )
+    if args.json:
+        print_json(state)
+    else:
+        md = sb_drift.render_markdown(state)
+        print(md)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(md if not args.json else json.dumps(state, ensure_ascii=False, indent=2))
+        print(f"\n[sb_drift] 报告已写入 {args.out}", file=sys.stderr)
+
+    if args.no_fail:
+        return 0
+    return 1 if state.get("has_drift") else 0
+
+
 def cmd_selfcheck(args):
     """Run self-check."""
     result = run_full_check(auto_fix=args.fix)
@@ -1540,6 +1568,18 @@ def build_parser():
     sp.add_argument("--fix", action="store_true", help="Auto-fix safe issues")
     sp.set_defaults(func=cmd_selfcheck)
 
+    # drift（v3.15，2026-10-20 借鉴 AOCI 漂移四态；只读）
+    sp = subparsers.add_parser(
+        "drift", help="Memory drift quad-state check (read-only): Stale/Orphan/Missing/Unbaselined"
+    )
+    sp.add_argument("--workspace", default=None, help="工作空间名（默认当前）")
+    sp.add_argument("--repo-root", default=None, help="路径存在性检查基准目录")
+    sp.add_argument("--json", action="store_true", help="输出 JSON（供看板/守护消费）")
+    sp.add_argument("--limit", type=int, default=10, help="每子类展示条数，0=不限")
+    sp.add_argument("--out", default=None, help="同时写 markdown 报告到文件")
+    sp.add_argument("--no-fail", action="store_true", help="恒退出 0（交互用）；默认有漂移退出 1")
+    sp.set_defaults(func=cmd_drift)
+
     # health
     sp = subparsers.add_parser("health", help="Show health score")
     sp.set_defaults(func=cmd_health)
@@ -2118,7 +2158,9 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    args.func(args)
+    # v3.15（2026-10-20）：让子命令可通过返回值控制退出码——drift 用它表达「存在漂移」。
+    # 其余命令均返回 None，`or 0` 兜底为 0，行为与改动前完全一致。
+    sys.exit(args.func(args) or 0)
 
 
 if __name__ == "__main__":
